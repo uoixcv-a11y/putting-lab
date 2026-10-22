@@ -229,7 +229,7 @@ input[type=number]{width:7em}
       <div class="field">
         <label for="fpsSel">카메라 프레임</label>
         <select id="fpsSel"><option value="60">60fps (권장)</option><option value="30">30fps</option></select>
-        <p class="help">폰 브라우저가 60fps를 지원하지 않으면 30fps로 찍혀요. 화면 오른쪽 위에 실제 프레임이 보여요.</p>
+        <p class="help">60fps를 고르면 1080p에서 먼저 시도하고, 안 되면 720p 60fps로 찍어요. 그래도 안 되는 카메라는 30fps로 찍혀요. 화면 오른쪽 위에 실제 프레임이 보여요.</p>
       </div>
       <div class="field">
         <label for="camSel">카메라</label>
@@ -495,7 +495,7 @@ input[type=number]{width:7em}
       const inner = median(core);
       if (inner - med < 25) return { err: ERR.contrast };
       const NA = 24, maxD = 0.5 * Math.min(g.w, g.h), RUN = Math.max(2, Math.round(0.012 * Math.min(g.w, g.h) * 2));
-      let mid = med + 0.45 * (inner - med), r = NaN, bg = med, okN = 0, grow = false;
+      let mid = med + 0.45 * (inner - med), r = NaN, bg = med, okN = 0, grow = false, lastRad = [];
       for (let it = 0; it < 3; it++) {
         const rad = [];
         for (let k = 0; k < NA; k++) {
@@ -509,6 +509,7 @@ input[type=number]{width:7em}
           }
           rad.push(found);
         }
+        lastRad = rad;
         const valid = rad.filter(Number.isFinite);
         if (valid.length < 8) { r = NaN; break; }
         // Re-center from opposite ray pairs (least squares), so an off-center tap or highlight doesn't skew the radius.
@@ -541,7 +542,9 @@ input[type=number]{width:7em}
       if (inner - bg < 25) return { err: ERR.contrast };
       const rv = r / g.kx;
       if (rv < 3) return { err: ERR.small };
-      const seed = { x: g.x0 + (cx + 0.5) / g.kx, y: g.y0 + (cy + 0.5) / g.ky, r: rv, t: vid.currentTime };
+      // round: share of edge rays within 10% of the radius. A ball scores about 0.9; a putter head or block about 0.4.
+      const round = lastRad.filter(d => Number.isFinite(d) && Math.abs(d - r) <= 0.1 * r).length / NA;
+      const seed = { x: g.x0 + (cx + 0.5) / g.kx, y: g.y0 + (cy + 0.5) / g.ky, r: rv, t: vid.currentTime, round };
       const D = detectBalls(seed, null) || [];
       const q = D.filter(d => Math.hypot(d.x - seed.x, d.y - seed.y) < 1.5 * rv).sort((a, b) => b.sc - a.sc)[0];
       if (!q) return { err: ERR.contrast };
@@ -563,7 +566,7 @@ input[type=number]{width:7em}
       const m = 2.2 * r;
       return q.x - roi.x0 < m || q.y - roi.y0 < m || roi.x0 + roi.w - q.x < m || roi.y0 + roi.h - q.y < m;
     };
-    let st = 'wait', restStart = 0, restT = 0, c0 = null, track = [], restPts = [];
+    let st = 'wait', restStart = 0, restT = 0, c0 = null, track = [], restPts = [], armed = false, nextCheck = 0;
     function finish() {
       const tr = track; track = []; st = 'wait';
       const pts = tr.slice(1);
@@ -611,13 +614,23 @@ input[type=number]{width:7em}
         : D.filter(q => hyp(q, seed) < 1.5 * r);
       if (near.length) {
         const q = near.reduce((a, b) => (b.sc > a.sc ? b : a));
-        if (st === 'wait') { st = 'rest'; restStart = t; restPts = []; }
+        if (st === 'wait') { st = 'rest'; restStart = t; restPts = []; armed = false; nextCheck = 0; }
         restPts.push(q); if (restPts.length > 6) restPts.shift();
         c0 = { x: restPts.reduce((a, p) => a + p.x, 0) / restPts.length, y: restPts.reduce((a, p) => a + p.y, 0) / restPts.length };
         restT = t;
+        // Only a real ball can start a putt: after a short rest, check it is as bright as the ball and the same size.
+        // Mat markings, the putter head or a hand sitting on the empty start spot fail this and are ignored.
+        if (!armed && real(t - restStart) >= 0.2 && t >= nextCheck) {
+          const scAvg = restPts.reduce((a, p) => a + p.sc, 0) / restPts.length;
+          let ok = scAvg >= 0.7 * ref.sc;
+          if (ok) { const s2 = seedBall(c0); ok = !s2.err && s2.round >= 0.7 && Math.abs(s2.r - r) <= 0.2 * r && Math.hypot(s2.x - c0.x, s2.y - c0.y) <= 0.6 * r; }
+          armed = ok;
+          if (!ok) nextCheck = t + 0.3 * sc;
+        }
         return null;
       }
       if (st !== 'rest') return null;
+      if (!armed) { if (real(t - restT) > 0.15) st = 'wait'; return null; }
       if (real(restT - restStart) < 0.25) { if (real(t - restT) > 0.15) st = 'wait'; return null; }
       const maxStep = mps2px(6) * (t - restT) + r;
       const C = D.filter(q => hyp(q, c0) <= maxStep && q.sc >= 0.6 * ref.sc);
@@ -637,6 +650,7 @@ input[type=number]{width:7em}
       flush: () => (st === 'move' ? finish() : null),
       current: () => (st === 'move' ? track.slice() : null),
       rest: () => (st === 'rest' ? c0 : null),
+      armed: () => st === 'rest' && armed,
       state: () => st
     };
   }
@@ -758,21 +772,35 @@ input[type=number]{width:7em}
     return '카메라를 켜지 못했어요. 페이지를 새로 고친 뒤 다시 해보세요.';
   }
 
+  // 60fps has to be asked for firmly: iPhone browsers otherwise pick 1080p at 30fps, and some phones offer 60fps only at 720p.
+  let camMaxFps = null;
   async function startCamera() {
     stopCamera();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setHint(camError(null), true); return; }
-    const fps = +settings.fps || 30;
-    const video = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: fps, max: fps } };
-    if (settings.deviceId) video.deviceId = { exact: settings.deviceId }; else video.facingMode = { ideal: 'environment' };
+    const want = +settings.fps || 30;
+    const which = () => (settings.deviceId ? { deviceId: { exact: settings.deviceId } } : { facingMode: { ideal: 'environment' } });
+    const tries = want >= 60
+      ? [
+          { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { min: 50, ideal: 60 } },
+          { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { min: 50, ideal: 60 } },
+          { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } }
+        ]
+      : [{ width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 30 } }];
     setHint('카메라를 켜는 중…');
-    try {
-      try { stream = await navigator.mediaDevices.getUserMedia({ audio: false, video }); }
-      catch (e) {
-        if (!settings.deviceId) throw e;
-        delete video.deviceId; video.facingMode = { ideal: 'environment' };
-        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+    let err = null;
+    for (let pass = 0; pass < 2 && !stream; pass++) {
+      if (pass === 1) { if (!settings.deviceId) break; settings.deviceId = ''; }
+      for (const t of tries) {
+        try { stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: Object.assign(which(), t) }); break; }
+        catch (e) { err = e; if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError' || e.name === 'NotReadableError')) { pass = 2; break; } }
       }
-    } catch (e) { stream = null; setHint(camError(e), true); return; }
+    }
+    if (!stream) { setHint(camError(err), true); return; }
+    camMaxFps = null;
+    try {
+      const tr = stream.getVideoTracks()[0], cap = tr.getCapabilities ? tr.getCapabilities() : null;
+      if (cap && cap.frameRate && cap.frameRate.max) camMaxFps = cap.frameRate.max;
+    } catch (e) {}
     vid.srcObject = stream;
     try { await vid.play(); } catch (e) {}
     tBase = null; lastT = null; gaps = []; fpsLive = null; lastDims = '';
@@ -882,12 +910,11 @@ input[type=number]{width:7em}
     if (st === 'wait' && prevState !== 'move') curDropped = 0;
     live.D = D; live.track = tracker.current(); live.rest = rest;
 
-    if (rest && restSince != null && t - restSince >= 0.3) {
-      if (seed.restored) { confirmSeed(rest); return; }
-      if (!beeped) { beeped = true; if (settings.beep) beep(); setPill('ready', '준비됨 · 퍼팅하세요'); }
-    }
+    if (rest && restSince != null && t - restSince >= 0.3 && seed.restored) { confirmSeed(rest); return; }
+    // Ready only once the thing on the start spot has been confirmed as a ball.
+    if (tracker.armed() && !beeped) { beeped = true; if (settings.beep) beep(); setPill('ready', '준비됨 · 퍼팅하세요'); }
     if (st === 'move') setPill('move', '공을 따라가는 중');
-    else if (!rest) setPill('wait', '공을 출발 자리에 놓으세요');
+    else if (!tracker.armed()) setPill('wait', '공을 출발 자리에 놓으세요');
     if (res) onPutt(res);
   }
 
@@ -895,7 +922,7 @@ input[type=number]{width:7em}
   function confirmSeed(c0) {
     const old = S.seed, s2 = seedBall(c0);
     let moved = false;
-    if (!s2.err && Math.abs(s2.r - old.r) <= 0.25 * old.r) {
+    if (!s2.err && s2.round >= 0.7 && Math.abs(s2.r - old.r) <= 0.25 * old.r) {
       if (Math.hypot(s2.x - old.x, s2.y - old.y) > 0.5 * old.r || Math.abs(s2.r - old.r) > 0.08 * old.r) { S.seed = s2; moved = true; }
       else S.seed = { x: old.x, y: old.y, r: old.r, t: s2.t, ref: s2.ref };
     } else {
@@ -918,11 +945,31 @@ input[type=number]{width:7em}
     S.seed = run.seed;
     try { return runMetrics(run); } finally { S.seed = keep; }
   }
+  // A real roll slows smoothly and frames arrive evenly; anything else is a glitch and is not read out as a result.
+  function trackOk(run) {
+    const pts = [run.c0 ? { t: run.tRest, x: run.c0.x, y: run.c0.y } : null].concat(run.pts).filter(Boolean).slice(1);
+    if (pts.length < 3) return false;
+    const sp = [];
+    for (let i = 1; i < pts.length; i++) {
+      const dt = pts[i].t - pts[i - 1].t;
+      if (!(dt > 0) || (fpsLive && dt < 0.6 / fpsLive)) return false;
+      sp.push(Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y) / dt);
+    }
+    const md = median(sp);
+    return md > 0 && sp.every(v => v > 0.55 * md && v < 1.6 * md);
+  }
   function onPutt(run) {
     run.seed = { x: S.seed.x, y: S.seed.y, r: S.seed.r };
     run.dropped = curDropped >= DROP_WARN; curDropped = 0;
     const m = metricsFor(run);
     if (!m || !(m.v0 > 0.2 && m.v0 < 8)) return;
+    // A putt rolls roughly along the target line; something moving off at a steep angle is not a putt.
+    if (S.view === 'top' && S.target && m.ang != null && Math.abs(m.ang) > 20) return;
+    if (!trackOk(run) || m.v0 > 6 || m.roll > 25) {
+      speak('측정이 불안정했어요. 한 번 더 쳐주세요');
+      setPill('warn', '측정 실패 · 다시 쳐주세요');
+      return;
+    }
     runs.push(run); lastRun = run;
     speak(sayText(m, run.dropped));
     setPill('wait', '측정 완료 · 다음 공을 놓으세요');
@@ -1075,7 +1122,7 @@ input[type=number]{width:7em}
     if (!stream) { setHint(''); return; }
     if (running) {
       const want = +settings.fps;
-      setHint(fpsLive && want === 60 && fpsLive < 45 ? '이 폰 브라우저에서는 카메라가 30fps로 찍혀요. 측정은 그대로 돼요.' : '공을 출발 자리에 놓고 멈추면 띵 소리가 나요. 그다음 퍼팅하세요.');
+      setHint(fpsLive && want === 60 && fpsLive < 45 ? (camMaxFps && camMaxFps < 50 ? `이 카메라는 브라우저에서 최대 ${Math.round(camMaxFps)}fps까지만 돼요. 설정에서 다른 카메라를 골라보거나 30fps로 쓰세요. 측정은 그대로 돼요.` : '카메라가 30fps로 찍히고 있어요. 측정은 그대로 돼요.') : '공을 출발 자리에 놓고 멈추면 띵 소리가 나요. 그다음 퍼팅하세요.');
       return;
     }
     if (S.tool === 'seed') { setHint(S.seed ? '준비됐어요. 측정 시작을 누르세요. 출발 자리를 바꾸려면 공을 다시 누르세요.' : '출발 자리에 놓인 공을 누르세요. 공 크기로 거리를 자동으로 맞춰요.'); return; }

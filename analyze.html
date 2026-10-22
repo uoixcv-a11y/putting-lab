@@ -1327,7 +1327,7 @@ input[type=number]{width:7em}
       const inner = median(core);
       if (inner - med < 25) return { err: ERR.contrast };
       const NA = 24, maxD = 0.5 * Math.min(g.w, g.h), RUN = Math.max(2, Math.round(0.012 * Math.min(g.w, g.h) * 2));
-      let mid = med + 0.45 * (inner - med), r = NaN, bg = med, okN = 0, grow = false;
+      let mid = med + 0.45 * (inner - med), r = NaN, bg = med, okN = 0, grow = false, lastRad = [];
       for (let it = 0; it < 3; it++) {
         const rad = [];
         for (let k = 0; k < NA; k++) {
@@ -1341,6 +1341,7 @@ input[type=number]{width:7em}
           }
           rad.push(found);
         }
+        lastRad = rad;
         const valid = rad.filter(Number.isFinite);
         if (valid.length < 8) { r = NaN; break; }
         // Re-center from opposite ray pairs (least squares), so an off-center tap or highlight doesn't skew the radius.
@@ -1373,7 +1374,9 @@ input[type=number]{width:7em}
       if (inner - bg < 25) return { err: ERR.contrast };
       const rv = r / g.kx;
       if (rv < 3) return { err: ERR.small };
-      const seed = { x: g.x0 + (cx + 0.5) / g.kx, y: g.y0 + (cy + 0.5) / g.ky, r: rv, t: vid.currentTime };
+      // round: share of edge rays within 10% of the radius. A ball scores about 0.9; a putter head or block about 0.4.
+      const round = lastRad.filter(d => Number.isFinite(d) && Math.abs(d - r) <= 0.1 * r).length / NA;
+      const seed = { x: g.x0 + (cx + 0.5) / g.kx, y: g.y0 + (cy + 0.5) / g.ky, r: rv, t: vid.currentTime, round };
       const D = detectBalls(seed, null) || [];
       const q = D.filter(d => Math.hypot(d.x - seed.x, d.y - seed.y) < 1.5 * rv).sort((a, b) => b.sc - a.sc)[0];
       if (!q) return { err: ERR.contrast };
@@ -1395,7 +1398,7 @@ input[type=number]{width:7em}
       const m = 2.2 * r;
       return q.x - roi.x0 < m || q.y - roi.y0 < m || roi.x0 + roi.w - q.x < m || roi.y0 + roi.h - q.y < m;
     };
-    let st = 'wait', restStart = 0, restT = 0, c0 = null, track = [], restPts = [];
+    let st = 'wait', restStart = 0, restT = 0, c0 = null, track = [], restPts = [], armed = false, nextCheck = 0;
     function finish() {
       const tr = track; track = []; st = 'wait';
       const pts = tr.slice(1);
@@ -1443,13 +1446,23 @@ input[type=number]{width:7em}
         : D.filter(q => hyp(q, seed) < 1.5 * r);
       if (near.length) {
         const q = near.reduce((a, b) => (b.sc > a.sc ? b : a));
-        if (st === 'wait') { st = 'rest'; restStart = t; restPts = []; }
+        if (st === 'wait') { st = 'rest'; restStart = t; restPts = []; armed = false; nextCheck = 0; }
         restPts.push(q); if (restPts.length > 6) restPts.shift();
         c0 = { x: restPts.reduce((a, p) => a + p.x, 0) / restPts.length, y: restPts.reduce((a, p) => a + p.y, 0) / restPts.length };
         restT = t;
+        // Only a real ball can start a putt: after a short rest, check it is as bright as the ball and the same size.
+        // Mat markings, the putter head or a hand sitting on the empty start spot fail this and are ignored.
+        if (!armed && real(t - restStart) >= 0.2 && t >= nextCheck) {
+          const scAvg = restPts.reduce((a, p) => a + p.sc, 0) / restPts.length;
+          let ok = scAvg >= 0.7 * ref.sc;
+          if (ok) { const s2 = seedBall(c0); ok = !s2.err && s2.round >= 0.7 && Math.abs(s2.r - r) <= 0.2 * r && Math.hypot(s2.x - c0.x, s2.y - c0.y) <= 0.6 * r; }
+          armed = ok;
+          if (!ok) nextCheck = t + 0.3 * sc;
+        }
         return null;
       }
       if (st !== 'rest') return null;
+      if (!armed) { if (real(t - restT) > 0.15) st = 'wait'; return null; }
       if (real(restT - restStart) < 0.25) { if (real(t - restT) > 0.15) st = 'wait'; return null; }
       const maxStep = mps2px(6) * (t - restT) + r;
       const C = D.filter(q => hyp(q, c0) <= maxStep && q.sc >= 0.6 * ref.sc);
@@ -1469,6 +1482,7 @@ input[type=number]{width:7em}
       flush: () => (st === 'move' ? finish() : null),
       current: () => (st === 'move' ? track.slice() : null),
       rest: () => (st === 'rest' ? c0 : null),
+      armed: () => st === 'rest' && armed,
       state: () => st
     };
   }
@@ -1784,7 +1798,7 @@ input[type=number]{width:7em}
       let s2 = null;
       // Measure from where the resting ball was actually seen in this video, not from the old spot.
       if (restSample != null) { try { await seekTo(restSample); s2 = seedBall(restSampleC0 || seed); } catch (e) { s2 = null; } }
-      if (s2 && !s2.err && Math.abs(s2.r - seed.r) <= 0.25 * seed.r) {
+      if (s2 && !s2.err && s2.round >= 0.7 && Math.abs(s2.r - seed.r) <= 0.25 * seed.r) {
         if (Math.hypot(s2.x - seed.x, s2.y - seed.y) > 0.5 * seed.r || Math.abs(s2.r - seed.r) > 0.08 * seed.r) { seed = s2; camMoved = true; }
         else seed = { x: seed.x, y: seed.y, r: seed.r, t: s2.t, ref: s2.ref };
       } else if (restStats.length >= 5) {
