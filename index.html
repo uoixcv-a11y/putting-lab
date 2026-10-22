@@ -194,7 +194,7 @@ input[type=number]{width:7em}
   </section>
 
   <section class="panel readout" id="session" aria-label="오늘 기록">
-    <div class="rhead"><h2>이번 연습 기록</h2><button type="button" class="ghost" id="clearRuns">기록 지우기</button></div>
+    <div class="rhead"><h2>이번 연습 기록</h2><div class="row"><button type="button" class="ghost" id="copyData">측정 데이터 복사</button><button type="button" class="ghost" id="clearRuns">기록 지우기</button></div></div>
     <div class="sum" id="sum"></div>
     <div class="runs">
       <div class="runs-h"><span>#</span><span>m/s</span><span id="runsAngH">방향</span><span>거리</span><span>목표 대비</span><span></span></div>
@@ -229,12 +229,16 @@ input[type=number]{width:7em}
       <div class="field">
         <label for="fpsSel">카메라 프레임</label>
         <select id="fpsSel"><option value="60">60fps (권장)</option><option value="30">30fps</option></select>
-        <p class="help">60fps를 고르면 1080p에서 먼저 시도하고, 안 되면 720p 60fps로 찍어요. 그래도 안 되는 카메라는 30fps로 찍혀요. 화면 오른쪽 위에 실제 프레임이 보여요.</p>
+        <p class="help">60fps를 고르면 1080p, 720p 순서로 시도하고, 그래도 30fps로 켜지면 다른 후면 카메라(1배 렌즈)를 자동으로 찾아봐요. 찾으면 기억해뒀다가 다음부터 바로 써요. 화면 오른쪽 위에 실제 프레임이 보여요.</p>
       </div>
       <div class="field">
         <label for="camSel">카메라</label>
         <select id="camSel"><option value="">기본 후면 카메라</option></select>
         <p class="help">0.5배 초광각은 가장자리가 휘어서 측정이 틀어져요. 1배 기본 카메라를 고르세요.</p>
+      </div>
+      <div class="field">
+        <span class="help" style="font-weight:600;color:var(--ink)">측정 시간 정보</span>
+        <p class="help" id="timingInfo">카메라를 켜면 나와요.</p>
       </div>
     </div>
   </details>
@@ -753,6 +757,9 @@ input[type=number]{width:7em}
   const DROP_WARN = 2;   // missed frames around one putt before it is flagged as less precise
   const ang1 = a => Math.round(Math.abs(a) * 10) / 10;
   let tBase = null, lastT = null, gaps = [], fpsLive = null, lastDims = '', live = { D: [], track: null, rest: null };
+  // Frame clock: the camera shoots at a steady rate, so time = frame count / frame rate.
+  // Raw frame times from some browsers wobble by several ms, which alone can swing ball speed by 30% or more.
+  let rawLast = null, pfLast = null, clockT = null, rawGaps = [], jitterMs = null, nFrames = 0;
   let armed = null, lastStageW = -1;
   const real = dt => dt;
 
@@ -773,7 +780,33 @@ input[type=number]{width:7em}
   }
 
   // 60fps has to be asked for firmly: iPhone browsers otherwise pick 1080p at 30fps, and some phones offer 60fps only at 720p.
-  let camMaxFps = null;
+  let camMaxFps = null, no60 = false;
+  const trackFps = st => { try { return st.getVideoTracks()[0].getSettings().frameRate || null; } catch (e) { return null; } };
+  async function find60(current) {
+    let devs = [];
+    try { devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); } catch (e) { return null; }
+    let curId = '';
+    try { curId = current.getVideoTracks()[0].getSettings().deviceId || ''; } catch (e) {}
+    const back = d => /back|rear|environment|후면|뒤/i.test(d.label) && !/front|전면/i.test(d.label);
+    const skip = d => /ultra|울트라|초광각|tele|망원/i.test(d.label);
+    const list = devs.filter(d => d.deviceId !== curId && back(d) && !skip(d));
+    if (!list.length) return null;
+    current.getTracks().forEach(t => t.stop());
+    for (const d of list) {
+      for (const size of [{ width: { ideal: 1920 }, height: { ideal: 1080 } }, { width: { ideal: 1280 }, height: { ideal: 720 } }]) {
+        try {
+          const st = await navigator.mediaDevices.getUserMedia({ audio: false, video: Object.assign({ deviceId: { exact: d.deviceId }, frameRate: { min: 50, ideal: 60 } }, size) });
+          const f = trackFps(st);
+          if (!f || f >= 50) { settings.deviceId = d.deviceId; saveSettings(); return st; }
+          st.getTracks().forEach(t => t.stop());
+        } catch (e) {}
+      }
+    }
+    // None does 60fps: reopen the original camera at its best rate.
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } } }).then(st => { no60 = true; return st; });
+    } catch (e) { return null; }
+  }
   async function startCamera() {
     stopCamera();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setHint(camError(null), true); return; }
@@ -796,6 +829,14 @@ input[type=number]{width:7em}
       }
     }
     if (!stream) { setHint(camError(err), true); return; }
+    // Still 30fps? iPhones often hand the browser a combined multi-lens camera that only does 30fps,
+    // while the single 1x lens can do 60. Try the other back cameras once and remember the one that works.
+    no60 = false;
+    if (want >= 60 && !settings.deviceId && trackFps(stream) && trackFps(stream) < 50) {
+      setHint('60fps가 되는 카메라를 찾는 중…');
+      const alt = await find60(stream);
+      if (alt) stream = alt; else no60 = true;
+    }
     camMaxFps = null;
     try {
       const tr = stream.getVideoTracks()[0], cap = tr.getCapabilities ? tr.getCapabilities() : null;
@@ -804,6 +845,7 @@ input[type=number]{width:7em}
     vid.srcObject = stream;
     try { await vid.play(); } catch (e) {}
     tBase = null; lastT = null; gaps = []; fpsLive = null; lastDims = '';
+    rawLast = null; pfLast = null; clockT = null; rawGaps = []; jitterMs = null; nFrames = 0;
     listCameras();
     frameLoop();
     updateAll();
@@ -833,14 +875,49 @@ input[type=number]{width:7em}
   function frameLoop() {
     const myStream = stream;
     if (hasRVFC) {
-      const cb = (now, md) => { if (stream !== myStream || !stream) return; onFrame(frameTime(md, now)); vid.requestVideoFrameCallback(cb); };
+      const cb = (now, md) => { if (stream !== myStream || !stream) return; onFrame(frameClock(frameTime(md, now), md)); vid.requestVideoFrameCallback(cb); };
       vid.requestVideoFrameCallback(cb);
     } else {
       tBase = 'now';
       let lastCt = -1;
-      const f = now => { if (stream !== myStream || !stream) return; if (vid.currentTime !== lastCt) { lastCt = vid.currentTime; onFrame(now / 1000); } requestAnimationFrame(f); };
+      const f = now => { if (stream !== myStream || !stream) return; if (vid.currentTime !== lastCt) { lastCt = vid.currentTime; onFrame(frameClock(now / 1000, null)); } requestAnimationFrame(f); };
       requestAnimationFrame(f);
     }
+  }
+
+  // Nominal rate from the median frame gap (counting skipped frames), snapped to a standard camera rate.
+  function nominalFps() {
+    const g = rawGaps.slice().sort((a, b) => a - b), med = g[g.length >> 1];
+    if (!(med > 0.002)) return null;
+    let frames = 0, total = 0;
+    rawGaps.forEach(x => { frames += Math.max(1, Math.round(x / med)); total += x; });
+    const f = frames / total;
+    return [24, 25, 30, 48, 50, 60, 90, 120, 240].find(v => Math.abs(f - v) / v < 0.03) || f;
+  }
+  function frameClock(raw, md) {
+    nFrames++;
+    const pf = md && Number.isFinite(md.presentedFrames) ? md.presentedFrames : null;
+    if (rawLast != null && raw > rawLast) { rawGaps.push(raw - rawLast); if (rawGaps.length > 120) rawGaps.shift(); }
+    if (rawGaps.length >= 10 && (!fpsLive || nFrames % 30 === 0)) {
+      fpsLive = nominalFps();
+      if (fpsLive) {
+        frameDur = 1 / fpsLive;
+        const dev = rawGaps.map(x => x - Math.max(1, Math.round(x * fpsLive)) / fpsLive);
+        jitterMs = 1000 * Math.sqrt(dev.reduce((a, d) => a + d * d, 0) / dev.length);
+        renderFps();
+      }
+    }
+    if (clockT == null || !fpsLive || rawLast == null) clockT = raw;
+    else {
+      // Frames elapsed since the last callback: from the frame counter when timing comes from the screen, else from the gap.
+      const byGap = Math.max(1, Math.round((raw - rawLast) * fpsLive));
+      const byCount = pf != null && pfLast != null && pf - pfLast >= 1 ? pf - pfLast : null;
+      const n = tBase === 'now' && byCount ? byCount : byGap;
+      clockT += n / fpsLive;
+      clockT += 0.02 * (raw - clockT);
+    }
+    rawLast = raw; pfLast = pf;
+    return clockT;
   }
 
   function onFrame(t) {
@@ -850,7 +927,6 @@ input[type=number]{width:7em}
     let gap = null;
     if (lastT != null && t > lastT) { gap = t - lastT; gaps.push(gap); if (gaps.length > 90) gaps.shift(); }
     lastT = t;
-    if (gaps.length >= 8 && (!fpsLive || gaps.length % 30 === 0)) { fpsLive = fpsFromGaps(gaps); if (fpsLive) frameDur = 1 / fpsLive; renderFps(); }
     if (running && S.seed) measureFrame(t, gap);
     draw();
   }
@@ -1113,6 +1189,10 @@ input[type=number]{width:7em}
   function setHint(text, warn) { hintEl.textContent = text || ''; hintEl.classList.toggle('warn', !!warn); }
   function setPill(s, text) { const p = $('#pill'); if (p.dataset.s !== s) p.dataset.s = s; const el = $('#pillText'); if (el.textContent !== text) el.textContent = text; }
   function renderFps() {
+    const src = tBase === 'capture' ? '카메라 촬영 시각' : tBase === 'media' ? '영상 시간' : '화면 표시 시각';
+    $('#timingInfo').textContent = fpsLive
+      ? `${Math.round(fpsLive)}fps · 시간 기준: ${src} · 프레임 간격 흔들림 ±${(jitterMs || 0).toFixed(1)}ms. 흔들림은 프레임 개수로 시간을 다시 계산해서 없애요.`
+      : '측정 중…';
     const b = $('#fpsBadge'), want = +settings.fps;
     b.textContent = fpsLive ? `${Math.round(fpsLive)}fps` : '';
     b.style.color = fpsLive && want && Math.abs(fpsLive - want) / want > 0.15 ? '#F0A35E' : '';
@@ -1122,7 +1202,7 @@ input[type=number]{width:7em}
     if (!stream) { setHint(''); return; }
     if (running) {
       const want = +settings.fps;
-      setHint(fpsLive && want === 60 && fpsLive < 45 ? (camMaxFps && camMaxFps < 50 ? `이 카메라는 브라우저에서 최대 ${Math.round(camMaxFps)}fps까지만 돼요. 설정에서 다른 카메라를 골라보거나 30fps로 쓰세요. 측정은 그대로 돼요.` : '카메라가 30fps로 찍히고 있어요. 측정은 그대로 돼요.') : '공을 출발 자리에 놓고 멈추면 띵 소리가 나요. 그다음 퍼팅하세요.');
+      setHint(fpsLive && want === 60 && fpsLive < 45 ? (no60 ? '이 폰의 브라우저 카메라는 모두 30fps까지만 돼요. 30fps로도 볼 스피드 오차는 2% 안팎이에요.' : camMaxFps && camMaxFps < 50 ? `이 카메라는 브라우저에서 최대 ${Math.round(camMaxFps)}fps까지만 돼요. 설정에서 다른 카메라를 골라보거나 30fps로 쓰세요. 측정은 그대로 돼요.` : '카메라가 30fps로 찍히고 있어요. 측정은 그대로 돼요.') : '공을 출발 자리에 놓고 멈추면 띵 소리가 나요. 그다음 퍼팅하세요.');
       return;
     }
     if (S.tool === 'seed') { setHint(S.seed ? '준비됐어요. 측정 시작을 누르세요. 출발 자리를 바꾸려면 공을 다시 누르세요.' : '출발 자리에 놓인 공을 누르세요. 공 크기로 거리를 자동으로 맞춰요.'); return; }
@@ -1220,6 +1300,19 @@ input[type=number]{width:7em}
     updateAll();
   });
   $('#clearRuns').addEventListener('click', () => { runs = []; lastRun = null; renderResults(); });
+  // Raw positions and times of this session, to paste into a chat when a result looks wrong.
+  $('#copyData').addEventListener('click', () => {
+    const r6 = v => Math.round(v * 1e4) / 1e4;
+    const data = {
+      ua: navigator.userAgent, fps: fpsLive, timeSource: tBase, jitterMs: jitterMs && r6(jitterMs), video: [vid.videoWidth, vid.videoHeight],
+      stimp: settings.stimp, seed: S.seed && { x: r6(S.seed.x), y: r6(S.seed.y), r: r6(S.seed.r) },
+      putts: runs.map(r => { const m = metricsFor(r); return { v0: m && r6(m.v0), roll: m && r6(m.roll), ang: m && m.ang != null ? r6(m.ang) : null, dropped: !!r.dropped, tRest: r6(r.tRest), c0: [r6(r.c0.x), r6(r.c0.y)], pts: r.pts.map(p => [r6(p.t), r6(p.x), r6(p.y)]) }; })
+    };
+    const text = JSON.stringify(data);
+    const b = $('#copyData');
+    const done = ok => { b.textContent = ok ? '복사했어요' : '복사하지 못했어요'; setTimeout(() => { b.textContent = '측정 데이터 복사'; }, 2000); };
+    try { navigator.clipboard.writeText(text).then(() => done(true), () => done(false)); } catch (e) { done(false); }
+  });
   $('#runsBody').addEventListener('click', e => { const b = e.target.closest('.ex'); if (!b) return; const r = runs[+b.dataset.ex]; if (r) { r.ex = !r.ex; renderResults(); } });
 
   const ids = { saySpeed: 'speed', sayDist: 'dist', sayDir: 'dir', sayDiff: 'diff' };
