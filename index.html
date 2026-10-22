@@ -1,0 +1,1200 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1D6A44">
+<title>실시간 퍼팅 랩</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+/* Layout: one column like a range-side launch monitor — live viewfinder, status, last-putt readout, session log, settings */
+:root{
+  --bg:#ECF0EB; --panel:#F7F9F6; --ink:#15241B; --muted:#58685D; --line:#CCD6CE;
+  --accent:#1D6A44; --accent-ink:#FFFFFF; --accent-soft:#DCEBE1; --warn:#9B4A12; --good:#1D6A44;
+  --stage:#0D1310; --stage-ink:#DDE6E0; --stage-dim:#7E9086; --stage-line:#26332C; --cam:#FFD23F;
+  --font-ui:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --font-num:"Barlow Condensed","Arial Narrow","Roboto Condensed",system-ui,sans-serif;
+  color-scheme:light;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1411; --panel:#151F1A; --ink:#E1E9E3; --muted:#93A399; --line:#28362E;
+    --accent:#4CC38A; --accent-ink:#05140C; --accent-soft:#1A3326; --warn:#F0A35E; --good:#4CC38A;
+    --stage:#060A08; --stage-line:#1E2A23; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1411; --panel:#151F1A; --ink:#E1E9E3; --muted:#93A399; --line:#28362E;
+  --accent:#4CC38A; --accent-ink:#05140C; --accent-soft:#1A3326; --warn:#F0A35E; --good:#4CC38A;
+  --stage:#060A08; --stage-line:#1E2A23; color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:14px 40px;-webkit-tap-highlight-color:transparent;
+}
+button,select,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{max-width:760px;margin:0 auto;display:grid;gap:14px}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.eyebrow{font-family:var(--font-num);font-weight:600;letter-spacing:.16em;font-size:.78rem;color:var(--muted);text-transform:uppercase;margin:0}
+h1{margin:0;font-size:1.32rem;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+.navlink{color:var(--accent);font-weight:600;text-decoration:underline;text-underline-offset:3px;font-size:.92rem}
+
+.stage-wrap{display:flex;flex-direction:column;align-items:center;gap:8px}
+.stage{position:relative;background:var(--stage);color:var(--stage-ink);border-radius:14px;overflow:hidden;width:100%;max-width:100%}
+.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.stage video{object-fit:fill;background:var(--stage)}
+.stage canvas{touch-action:none;cursor:crosshair}
+.stage.empty video,.stage.empty canvas,.stage.empty .pill{display:none}
+.guide{display:none;padding:18px 16px 20px;gap:14px}
+.stage.empty .guide{display:grid}
+.guide h2{margin:0;font-size:1rem;font-weight:600;color:var(--stage-ink)}
+.guide p,.guide li{margin:0;color:var(--stage-dim);font-size:.86rem}
+.guide ol{margin:0;padding-left:1.2em;display:grid;gap:4px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 20px;border-radius:999px;font-weight:600;cursor:pointer;border:0}
+.btn.cam{background:var(--cam);color:#1A1606;justify-self:start}
+.pill{position:absolute;left:calc(10px + env(safe-area-inset-left,0px) * 0);top:10px;z-index:2;font-weight:600;font-size:.86rem;padding:5px 12px;border-radius:999px;background:rgba(6,10,8,.72);color:#DDE6E0;display:inline-flex;align-items:center;gap:7px;pointer-events:none}
+.pill i{width:9px;height:9px;border-radius:50%;background:#7E9086}
+.pill[data-s="ready"] i{background:#4CC38A}
+.pill[data-s="move"] i{background:#FFD23F}
+.pill[data-s="wait"] i{background:#DDE6E0}
+.pill[data-s="warn"] i{background:#F0A35E}
+.fpsbadge{position:absolute;right:10px;top:10px;z-index:2;font-family:var(--font-num);font-weight:600;font-size:.9rem;padding:4px 10px;border-radius:999px;background:rgba(6,10,8,.72);color:#DDE6E0;pointer-events:none}
+.stage.empty .fpsbadge{display:none}
+.hint{margin:0;font-size:.9rem;color:var(--muted);min-height:1.4em;text-align:center;max-width:62ch}
+.hint.warn{color:var(--warn);font-weight:500}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px}
+.controls{padding:12px;display:grid;gap:10px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.seg{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px}
+.seg button{appearance:none;border:0;background:transparent;color:var(--muted);font-weight:500;padding:4px 12px;border-radius:999px;cursor:pointer;min-height:34px;font-size:.88rem}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.chip{appearance:none;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:.92rem;font-weight:500;padding:6px 14px;border-radius:999px;display:inline-flex;align-items:center;gap:7px;min-height:40px;cursor:pointer}
+.chip[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
+.chip:disabled{opacity:.45;cursor:default}
+.st{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--muted);display:inline-grid;place-items:center}
+.chip.ok .st{border-color:var(--accent);background:var(--accent)}
+.chip.ok .st::after{content:"";width:6px;height:3px;border-left:1.6px solid var(--accent-ink);border-bottom:1.6px solid var(--accent-ink);transform:translateY(-1px) rotate(-45deg)}
+.go{appearance:none;border:0;border-radius:999px;min-height:48px;padding:0 22px;font-weight:600;font-size:1rem;background:var(--accent);color:var(--accent-ink);cursor:pointer}
+.go.stop{background:var(--warn);color:#fff}
+.go:disabled{opacity:.45;cursor:default}
+.ghost{appearance:none;border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:999px;min-height:40px;padding:0 14px;cursor:pointer;font-size:.9rem}
+.ghost.armed{border-color:var(--warn);color:var(--warn)}
+
+.readout{padding:12px;display:grid;gap:10px}
+.rhead{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.rhead h2{margin:0;font-size:.95rem;font-weight:600}
+.rhead .sub{font-size:.82rem;color:var(--muted);font-weight:500}
+.badge{font-size:.72rem;font-weight:600;letter-spacing:.06em;padding:2px 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+.tiles{display:grid;gap:8px;grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (min-width:640px){.tiles{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.tile{background:var(--bg);border-radius:10px;padding:10px 12px;display:grid;gap:1px;min-width:0;align-content:start}
+.tile .k{font-size:.78rem;color:var(--muted);font-weight:500}
+.tile .v{font-family:var(--font-num);font-weight:600;font-size:2.05rem;line-height:1.05;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .v small{font-size:.95rem;font-weight:500;color:var(--muted);margin-left:3px}
+.tile .s{font-size:.76rem;color:var(--muted);line-height:1.35}
+.tile.short .v span{color:var(--warn)}
+.tile.long .v span{color:var(--warn)}
+.tile.hit .v span{color:var(--good)}
+.readout.example .tile .v span{color:var(--muted)}
+
+.runs{display:grid;gap:2px}
+.runs-h,.run{display:grid;grid-template-columns:1.6em minmax(0,1fr) minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.1fr) 3.4em;gap:6px;align-items:center;padding:6px 8px}
+.runs-h{font-size:.74rem;color:var(--muted);font-weight:600;padding-block:2px}
+.run{border-radius:8px;font-family:var(--font-num);font-size:1.05rem;font-variant-numeric:tabular-nums}
+#runsBody .run:nth-child(odd){background:var(--bg)}
+.run.excl span{color:var(--muted);text-decoration:line-through}
+.run .flag{color:var(--warn)}
+.run .ex{appearance:none;border:1px solid var(--line);background:var(--panel);border-radius:999px;font-family:var(--font-ui);font-size:.74rem;padding:3px 0;color:var(--muted);cursor:pointer}
+.runs-empty{margin:4px 0;font-size:.84rem;color:var(--muted)}
+.sum{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.84rem;color:var(--muted)}
+.sum b{font-family:var(--font-num);font-weight:600;font-size:1.05rem;color:var(--ink);font-variant-numeric:tabular-nums}
+
+details.settings{padding:2px 14px}
+summary{cursor:pointer;padding:11px 0;font-weight:600;font-size:.95rem}
+.set-grid{display:grid;gap:14px;padding:2px 0 16px}
+.field{display:grid;gap:5px;border:0;margin:0;padding:0;min-width:0}
+.field>label,.field legend{font-size:.86rem;font-weight:600;padding:0}
+select,input[type=number]{padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);min-height:42px;max-width:100%}
+input[type=number]{width:7em}
+.checks{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:.9rem}
+.checks label{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.checks input{accent-color:var(--accent);width:18px;height:18px}
+.help{margin:0;font-size:.8rem;color:var(--muted)}
+.notes{margin:0;padding:0 2px;display:grid;gap:4px;font-size:.8rem;color:var(--muted);list-style:none}
+.notes li{max-width:70ch}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <p class="eyebrow">Putting · Live voice</p>
+      <h1>실시간 퍼팅 랩</h1>
+    </div>
+    <a class="navlink" href="analyze.html">찍은 영상 분석하기 →</a>
+  </header>
+
+  <section class="stage-wrap">
+    <div class="stage empty" id="stage">
+      <video id="cam" playsinline muted autoplay></video>
+      <canvas id="overlay" aria-label="카메라 화면 위에 점을 찍는 영역"></canvas>
+      <div class="pill" id="pill" data-s="off"><i></i><span id="pillText">카메라 꺼짐</span></div>
+      <div class="fpsbadge" id="fpsBadge"></div>
+      <div class="guide">
+        <div>
+          <h2>삼각대에 폰을 고정하고 시작하세요</h2>
+          <p>퍼팅할 때마다 볼 스피드와 거리를 소리로 알려줘요. 영상은 폰 안에서만 처리돼요.</p>
+        </div>
+        <ol>
+          <li>공 위에서 내려다보게 폰을 고정해요. 공 앞 30cm까지 화면에 들어오게요.</li>
+          <li>카메라를 켜고 출발 자리에 놓인 공을 한 번 눌러요.</li>
+          <li>목표선을 긋고 측정 시작을 누르면 끝이에요. 다음부터는 저장된 설정을 그대로 써요.</li>
+        </ol>
+        <button type="button" class="btn cam" id="camOn">카메라 켜기</button>
+      </div>
+    </div>
+    <p class="hint" id="hint" role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="panel controls" aria-label="설정과 측정">
+    <div class="row">
+      <div class="seg" role="group" aria-label="촬영 방향">
+        <button type="button" data-view="top" aria-pressed="true">위에서</button>
+        <button type="button" data-view="side" aria-pressed="false">옆에서</button>
+      </div>
+      <button type="button" class="chip" data-tool="seed"><i class="st"></i>출발 자리</button>
+      <button type="button" class="chip" data-tool="ref"><i class="st"></i><span id="refName">목표선</span></button>
+    </div>
+    <div class="row">
+      <button type="button" class="go" id="run" disabled>측정 시작</button>
+      <button type="button" class="ghost" id="reset">설정 지우기</button>
+    </div>
+  </section>
+
+  <section class="panel readout example" id="last" aria-label="최근 퍼팅">
+    <div class="rhead"><h2>최근 퍼팅 <span class="sub" id="lastNo"></span></h2><span class="badge" id="lastEx">예시</span></div>
+    <div class="tiles">
+      <div class="tile"><span class="k">볼 스피드</span><div class="v"><span id="lSpeed">2.02</span><small>m/s</small></div><span class="s" id="lSpeedS">4.5 mph · 임팩트 직후</span></div>
+      <div class="tile"><span class="k">예상 굴림 거리</span><div class="v"><span id="lRoll">2.1</span><small>m</small></div><span class="s" id="lRollS">스팀프 10 기준</span></div>
+      <div class="tile"><span class="k" id="lAngK">출발 방향</span><div class="v"><span id="lAng">0.7</span><small>°</small></div><span class="s" id="lAngS">목표선 왼쪽</span></div>
+      <div class="tile" id="lDiffTile"><span class="k">목표 대비</span><div class="v"><span id="lDiff">−0.9</span><small id="lDiffU">m</small></div><span class="s" id="lDiffS">목표 3.0m</span></div>
+    </div>
+  </section>
+
+  <section class="panel readout" id="session" aria-label="오늘 기록">
+    <div class="rhead"><h2>이번 연습 기록</h2><button type="button" class="ghost" id="clearRuns">기록 지우기</button></div>
+    <div class="sum" id="sum"></div>
+    <div class="runs">
+      <div class="runs-h"><span>#</span><span>m/s</span><span id="runsAngH">방향</span><span>거리</span><span>목표 대비</span><span></span></div>
+      <div id="runsBody"></div>
+    </div>
+  </section>
+
+  <details class="panel settings">
+    <summary>소리 · 카메라 · 그린 설정</summary>
+    <div class="set-grid">
+      <fieldset class="field">
+        <legend>읽어줄 내용</legend>
+        <div class="checks">
+          <label><input type="checkbox" id="saySpeed">볼 스피드</label>
+          <label><input type="checkbox" id="sayDist">예상 거리</label>
+          <label><input type="checkbox" id="sayDir">방향</label>
+          <label><input type="checkbox" id="sayDiff">목표 대비</label>
+          <label><input type="checkbox" id="beepOn">준비되면 띵 소리</label>
+        </div>
+        <div class="row"><button type="button" class="ghost" id="testVoice">소리 들어보기</button></div>
+      </fieldset>
+      <div class="field">
+        <label for="target">목표 거리 (m)</label>
+        <input type="number" id="target" min="0" max="30" step="0.5" inputmode="decimal">
+        <p class="help">0으로 두면 꺼져요. 정해두면 퍼팅마다 "20센티 짧아요"처럼 알려줘요.</p>
+      </div>
+      <div class="field">
+        <label for="stimp">그린 빠르기 (스팀프, 피트)</label>
+        <input type="number" id="stimp" min="3" max="16" step="0.5" inputmode="decimal">
+        <p class="help">예상 거리를 이 빠르기의 그린 기준으로 계산해요. 한국식 그린 스피드 2.8m는 9.2예요. 매트 실제 거리에 맞추려면 매트 스팀프를 넣으세요.</p>
+      </div>
+      <div class="field">
+        <label for="fpsSel">카메라 프레임</label>
+        <select id="fpsSel"><option value="60">60fps (권장)</option><option value="30">30fps</option></select>
+        <p class="help">폰 브라우저가 60fps를 지원하지 않으면 30fps로 찍혀요. 화면 오른쪽 위에 실제 프레임이 보여요.</p>
+      </div>
+      <div class="field">
+        <label for="camSel">카메라</label>
+        <select id="camSel"><option value="">기본 후면 카메라</option></select>
+        <p class="help">0.5배 초광각은 가장자리가 휘어서 측정이 틀어져요. 1배 기본 카메라를 고르세요.</p>
+      </div>
+    </div>
+  </details>
+
+  <ul class="notes">
+    <li>공을 출발 자리에 놓고 멈추면 띵 소리가 나요. 그다음 퍼팅하면 공이 30cm쯤 굴러간 뒤 결과를 읽어줘요.</li>
+    <li>볼 스피드는 공 지름(42.67mm)과 카메라 프레임 시간으로 재요. 매트 빠르기나 경사와는 상관없어요.</li>
+    <li>출발 자리와 목표선은 이 폰에 저장돼요. 삼각대를 옮겼다면 출발 자리를 다시 눌러주세요.</li>
+    <li>측정하는 동안 화면이 꺼지지 않게 해요. 배터리가 빨리 닳으니 충전기를 연결해두면 좋아요.</li>
+  </ul>
+</div>
+<script>
+(() => {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const vid = $('#cam'), cv = $('#overlay'), ctx = cv.getContext('2d'), stage = $('#stage'), hintEl = $('#hint');
+  const BALL_MM = 42.67, STIMP_V = 1.83, FT = 0.3048, MPH = 2.23694;
+  const C = { target: '#FF5FA2', ground: '#3FD0FF', calib: '#FFFFFF', ball: '#FFD23F' };
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const dist = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+  const fmtNum = x => String(+(+x).toFixed(2));
+  const median = arr => { const s = arr.slice().sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+  const hasRVFC = typeof HTMLVideoElement !== 'undefined' && 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+
+  // Live camera: no slow motion, ball-diameter calibration only.
+  const settings = { scale: 1, stimp: 10, calMode: 'ball', calLen: 30, fps: '60', target: 0, deviceId: '', beep: true, say: { speed: true, dist: true, dir: true, diff: true } };
+  try { const s = JSON.parse(localStorage.getItem('live.settings') || 'null'); if (s && typeof s === 'object') { Object.assign(settings, s, { scale: 1, calMode: 'ball' }); settings.say = Object.assign({ speed: true, dist: true, dir: true, diff: true }, s.say || {}); } } catch (e) {}
+  const saveSettings = () => { try { localStorage.setItem('live.settings', JSON.stringify(settings)); } catch (e) {} };
+
+  // Same shape as the video-analysis page so the shared measuring code runs unchanged.
+  const S = { seed: null, target: null, ground: null, calib: null, view: 'top', tool: 'seed', pendingA: null, note: null };
+  const tabs = { putt: S };
+  let cssW = 0, cssH = 0, drag = null, frameDur = 1 / 30;
+  /* ---------- shared with the video-analysis page (drawing helpers) ---------- */
+  function outlined(color, w, dash) {
+    ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash(dash || []);
+    ctx.lineWidth = w + 3; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.stroke();
+    ctx.lineWidth = w; ctx.strokeStyle = color; ctx.stroke();
+    ctx.restore();
+  }
+  function ring(s, r, color, w) { ctx.beginPath(); ctx.arc(s[0], s[1], r, 0, Math.PI * 2); outlined(color, w || 2); }
+  function dot(s, color) {
+    ctx.beginPath(); ctx.arc(s[0], s[1], 5.5, 0, Math.PI * 2); ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(s[0], s[1], 3.5, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+  }
+  function tag(text, x, y, color) {
+    ctx.save();
+    ctx.font = '600 14px "Barlow Condensed","IBM Plex Sans KR",sans-serif';
+    ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    const w = ctx.measureText(text).width;
+    x = clamp(x, 4, Math.max(4, cssW - w - 4)); y = clamp(y, 10, Math.max(10, cssH - 10));
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.72)'; ctx.strokeText(text, x, y);
+    ctx.fillStyle = color; ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+  function path(pts) {
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mx = (pts[i][0] + pts[i + 1][0]) / 2, my = (pts[i][1] + pts[i + 1][1]) / 2;
+      ctx.quadraticCurveTo(pts[i][0], pts[i][1], mx, my);
+    }
+    if (pts.length > 1) ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+  }
+  function clipInf(a, b) {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return null;
+    let t0 = -1e9, t1 = 1e9;
+    const p = [-dx, dx, -dy, dy], q = [a[0], cssW - a[0], a[1], cssH - a[1]];
+    for (let i = 0; i < 4; i++) {
+      if (Math.abs(p[i]) < 1e-12) { if (q[i] < 0) return null; }
+      else { const r = q[i] / p[i]; if (p[i] < 0) { if (r > t0) t0 = r; } else { if (r < t1) t1 = r; } }
+    }
+    if (t0 > t1) return null;
+    return [[a[0] + t0 * dx, a[1] + t0 * dy], [a[0] + t1 * dx, a[1] + t1 * dy]];
+  }
+  function lineDeg(a, b) {
+    let d = Math.abs(Math.atan2(-(b.y - a.y), b.x - a.x) * 180 / Math.PI);
+    return d > 90 ? 180 - d : d;
+  }
+  function arrowHead(from, to, color) {
+    const ang = Math.atan2(to[1] - from[1], to[0] - from[0]), L = 10;
+    ctx.beginPath();
+    ctx.moveTo(to[0] - L * Math.cos(ang - 0.45), to[1] - L * Math.sin(ang - 0.45));
+    ctx.lineTo(to[0], to[1]);
+    ctx.lineTo(to[0] - L * Math.cos(ang + 0.45), to[1] - L * Math.sin(ang + 0.45));
+    outlined(color, 2);
+  }
+
+  function loupe(p, S, kx, ky) {
+    const vw = vid.videoWidth, vh = vid.videoHeight;
+    const R = Math.round(clamp(Math.min(cssW, cssH) * 0.17, 40, 66)), Z = 3;
+    const [px, py] = S(p);
+    let cx = px, cy = py - R - 34;
+    if (cy - R < 4) cy = py + R + 34;
+    cx = clamp(cx, R + 4, cssW - R - 4); cy = clamp(cy, R + 4, cssH - R - 4);
+    const hx = (R / Z) / kx, hy = (R / Z) / ky;
+    const x0 = p.x - hx, y0 = p.y - hy, w = 2 * hx, h = 2 * hy;
+    const sx0 = Math.max(0, x0), sy0 = Math.max(0, y0), sx1 = Math.min(vw, x0 + w), sy1 = Math.min(vh, y0 + h);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.closePath();
+    ctx.fillStyle = '#0D1310'; ctx.fill(); ctx.clip();
+    if (sx1 > sx0 && sy1 > sy0) {
+      const dx = cx - R + (sx0 - x0) / w * 2 * R, dy = cy - R + (sy0 - y0) / h * 2 * R;
+      const dw = (sx1 - sx0) / w * 2 * R, dh = (sy1 - sy0) / h * 2 * R;
+      try { ctx.drawImage(vid, sx0, sy0, sx1 - sx0, sy1 - sy0, dx, dy, dw, dh); } catch (e) {}
+    }
+    ctx.beginPath();
+    ctx.moveTo(cx - R, cy); ctx.lineTo(cx - 5, cy); ctx.moveTo(cx + 5, cy); ctx.lineTo(cx + R, cy);
+    ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy - 5); ctx.moveTo(cx, cy + 5); ctx.lineTo(cx, cy + R);
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.stroke();
+    ctx.lineWidth = 1; ctx.strokeStyle = '#FFFFFF'; ctx.stroke();
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); outlined('#FFFFFF', 2);
+    ring([px, py], 11, '#FFFFFF', 1.6);
+  }
+
+  function drawRefCalib(st, S) {
+    const ref = st.view === 'top' ? st.target : st.ground;
+    if (ref) {
+      const col = st.view === 'top' ? C.target : C.ground;
+      const seg = clipInf(S(ref.a), S(ref.b));
+      if (seg) { ctx.beginPath(); ctx.moveTo(seg[0][0], seg[0][1]); ctx.lineTo(seg[1][0], seg[1][1]); outlined(col, 2, [9, 6]); }
+      const b = S(ref.b); tag(st.view === 'top' ? '목표선' : '지면', b[0] + 8, b[1] - 14, col);
+    }
+    if (st.calib) {
+      const a = S(st.calib.a), b = S(st.calib.b);
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); outlined(C.calib, 1.8);
+      tag(settings.calMode === 'ball' ? '42.67mm' : fmtNum(settings.calLen) + 'cm', (a[0] + b[0]) / 2 + 10, (a[1] + b[1]) / 2 + 16, C.calib);
+    }
+  }
+  /* ---------- shared with the video-analysis page (ball finder, tracker, speed math) ---------- */
+  const ERR = {
+    notfound: '여기서 공을 찾지 못했어요. 공이 출발 자리에 놓인 프레임에서 공 한가운데를 찍어주세요.',
+    contrast: '공과 바닥의 밝기 차이가 작아서 공을 구분하지 못했어요. 공 한가운데를 다시 찍거나 수동 모드를 써보세요.',
+    small: '공이 너무 작게 찍혔어요. 폰을 공에 더 가까이 두고 찍어주세요.',
+    big: '공 크기를 재지 못했어요. 공 한가운데를 다시 찍어주세요.'
+  };
+  const EX_RUNS = [[2.21, 0.6, 2.4], [2.14, -0.3, 2.2], [2.26, 1.1, 2.5], [2.08, 0.2, 2.1], [2.18, -0.4, 2.3]];
+  const RS = 6;            // ball radius in detector pixels
+  const ROI_R = 20;        // search area around the start spot, in ball radii
+  const STOP_R = 16;       // stop following a putt after this many ball radii
+
+  const ac = document.createElement('canvas');
+  const actx = ac.getContext('2d', { willReadFrequently: true });
+  let iiBuf = null;
+
+  // Copy part of the current video frame at scale k. m = min(R,G,B): a white ball is bright, a green mat or grass is dark.
+  function grabK(x0, y0, w, h, k) {
+    const cw = Math.max(1, Math.round(w * k)), ch = Math.max(1, Math.round(h * k));
+    if (ac.width !== cw || ac.height !== ch) { ac.width = cw; ac.height = ch; }
+    let d;
+    try {
+      actx.imageSmoothingEnabled = true; actx.imageSmoothingQuality = 'high';
+      actx.drawImage(vid, x0, y0, w, h, 0, 0, cw, ch);
+      d = actx.getImageData(0, 0, cw, ch).data;
+    } catch (e) { return null; }
+    const m = new Uint8Array(cw * ch);
+    for (let i = 0, j = 0; i < m.length; i++, j += 4) {
+      const r = d[j], g = d[j + 1], b = d[j + 2];
+      m[i] = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    }
+    return { m, w: cw, h: ch, x0, y0, kx: cw / w, ky: ch / h };
+  }
+  function cropBox(cx, cy, half) {
+    const vw = vid.videoWidth, vh = vid.videoHeight;
+    const x0 = clamp(Math.floor(cx - half), 0, vw - 1), y0 = clamp(Math.floor(cy - half), 0, vh - 1);
+    const x1 = clamp(Math.ceil(cx + half), x0 + 1, vw), y1 = clamp(Math.ceil(cy + half), y0 + 1, vh);
+    return { x0, y0, w: x1 - x0, h: y1 - y0 };
+  }
+  const sampleAt = (g, x, y) => {
+    const xi = Math.round(x), yi = Math.round(y);
+    return (xi < 0 || yi < 0 || xi >= g.w || yi >= g.h) ? -1 : g.m[yi * g.w + xi];
+  };
+
+  // Blob detector: bright square core minus its surroundings. Thin lines, text and ring markings score low; a ball scores high.
+  function detectBalls(seed, ref) {
+    if (!vid.videoWidth) return null;
+    const b0 = cropBox(seed.x, seed.y, ROI_R * seed.r);
+    const g = grabK(b0.x0, b0.y0, b0.w, b0.h, RS / seed.r);
+    if (!g) return null;
+    const w = g.w, h = g.h, A = 4, B = 9, W1 = w + 1;
+    if (w <= 2 * B + 4 || h <= 2 * B + 4) return [];
+    const need = W1 * (h + 1);
+    if (!iiBuf || iiBuf.length < need) iiBuf = new Int32Array(need);
+    const ii = iiBuf;
+    ii.fill(0, 0, W1);
+    for (let y = 0; y < h; y++) {
+      let row = 0;
+      ii[(y + 1) * W1] = 0;
+      for (let x = 0; x < w; x++) { row += g.m[y * w + x]; ii[(y + 1) * W1 + x + 1] = ii[y * W1 + x + 1] + row; }
+    }
+    const box = (xa, ya, xb, yb) => ii[yb * W1 + xb] - ii[ya * W1 + xb] - ii[yb * W1 + xa] + ii[ya * W1 + xa];
+    const ai = (2 * A + 1) * (2 * A + 1), ao = (2 * B + 1) * (2 * B + 1);
+    const scAt = (x, y) => {
+      const si = box(x - A, y - A, x + A + 1, y + A + 1), so = box(x - B, y - B, x + B + 1, y + B + 1);
+      return si / ai - (so - si) / (ao - ai);
+    };
+    const minSc = ref ? 0.45 * ref.sc : 18, minMi = ref ? ref.mi - 0.65 * ref.sc : 0;
+    const cand = [];
+    for (let y = B + 1; y < h - B - 2; y++) for (let x = B + 1; x < w - B - 2; x++) {
+      const si = box(x - A, y - A, x + A + 1, y + A + 1), so = box(x - B, y - B, x + B + 1, y + B + 1);
+      const mi = si / ai, sc = mi - (so - si) / (ao - ai);
+      if (sc >= minSc && mi >= minMi) cand.push(sc, mi, x, y);
+    }
+    const idx = [];
+    for (let i = 0; i < cand.length; i += 4) idx.push(i);
+    idx.sort((p, q) => cand[q] - cand[p]);
+    const out = [], R2 = (1.5 * RS) * (1.5 * RS);
+    for (const i of idx) {
+      const x = cand[i + 2], y = cand[i + 3];
+      if (out.some(o => (o.px - x) * (o.px - x) + (o.py - y) * (o.py - y) < R2)) continue;
+      const s0 = cand[i];
+      const sxm = scAt(x - 1, y), sxp = scAt(x + 1, y), sym = scAt(x, y - 1), syp = scAt(x, y + 1);
+      const dx = (2 * s0 - sxm - sxp) > 0 ? clamp((sxp - sxm) / (2 * (2 * s0 - sxm - sxp)), -0.5, 0.5) : 0;
+      const dy = (2 * s0 - sym - syp) > 0 ? clamp((syp - sym) / (2 * (2 * s0 - sym - syp)), -0.5, 0.5) : 0;
+      out.push({ px: x, py: y, cx: x + dx, cy: y + dy, sc: s0, mi: cand[i + 1] });
+      if (out.length >= 16) break;
+    }
+    return out.map(o => ({ x: g.x0 + (o.cx + 0.5) / g.kx, y: g.y0 + (o.cy + 0.5) / g.ky, sc: o.sc, mi: o.mi }));
+  }
+
+  // Find the ball under a tap: center and radius from 24 rays, then its look in the blob detector as a reference.
+  function seedBall(p) {
+    const vw = vid.videoWidth, vh = vid.videoHeight;
+    if (!vw || !vh) return { err: ERR.notfound };
+    let half = 0.07 * Math.max(vw, vh);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const bx0 = cropBox(p.x, p.y, half);
+      const g = grabK(bx0.x0, bx0.y0, bx0.w, bx0.h, Math.min(4, 260 / Math.max(bx0.w, bx0.h)));
+      if (!g) return { err: ERR.notfound };
+      const sorted = Array.from(g.m).sort((a, b) => a - b), med = sorted[sorted.length >> 1];
+      let cx = (p.x - g.x0) * g.kx, cy = (p.y - g.y0) * g.ky;
+      const R0 = Math.max(3, 0.1 * Math.min(g.w, g.h));
+      let best = -1, bx = cx, by = cy;
+      for (let y = Math.max(1, Math.floor(cy - R0)); y <= Math.min(g.h - 2, Math.ceil(cy + R0)); y++)
+        for (let x = Math.max(1, Math.floor(cx - R0)); x <= Math.min(g.w - 2, Math.ceil(cx + R0)); x++) {
+          if ((x - cx) * (x - cx) + (y - cy) * (y - cy) > R0 * R0) continue;
+          let s = 0;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) s += g.m[(y + dy) * g.w + x + dx];
+          if (s > best) { best = s; bx = x; by = y; }
+        }
+      if (best < 0) return { err: ERR.notfound };
+      cx = bx; cy = by;
+      // Smooth so dimples and print on the ball don't look like its edge.
+      const sm = new Uint8Array(g.m.length);
+      for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) {
+        let s = 0, n = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx, yy = y + dy;
+          if (xx >= 0 && yy >= 0 && xx < g.w && yy < g.h) { s += g.m[yy * g.w + xx]; n++; }
+        }
+        sm[y * g.w + x] = s / n;
+      }
+      const gs = { m: sm, w: g.w, h: g.h };
+      const core = [];
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const v = sampleAt(gs, cx + dx, cy + dy); if (v >= 0) core.push(v); }
+      const inner = median(core);
+      if (inner - med < 25) return { err: ERR.contrast };
+      const NA = 24, maxD = 0.5 * Math.min(g.w, g.h), RUN = Math.max(2, Math.round(0.012 * Math.min(g.w, g.h) * 2));
+      let mid = med + 0.45 * (inner - med), r = NaN, bg = med, okN = 0, grow = false;
+      for (let it = 0; it < 3; it++) {
+        const rad = [];
+        for (let k = 0; k < NA; k++) {
+          const a = k * 2 * Math.PI / NA, ca = Math.cos(a), sa = Math.sin(a);
+          let found = NaN, runStart = NaN, run = 0;
+          for (let d = 0.5; d < maxD; d += 0.5) {
+            const v = sampleAt(gs, cx + ca * d, cy + sa * d);
+            if (v < 0) break;
+            if (v < mid) { if (!run) runStart = d; run += 0.5; if (run >= RUN) { found = runStart; break; } }
+            else run = 0;
+          }
+          rad.push(found);
+        }
+        const valid = rad.filter(Number.isFinite);
+        if (valid.length < 8) { r = NaN; break; }
+        // Re-center from opposite ray pairs (least squares), so an off-center tap or highlight doesn't skew the radius.
+        const half2 = NA / 2, pairs = [];
+        for (let k = 0; k < half2; k++) if (Number.isFinite(rad[k]) && Number.isFinite(rad[k + half2])) pairs.push({ k, d: rad[k] + rad[k + half2], s: (rad[k] - rad[k + half2]) / 2 });
+        if (pairs.length >= 3) {
+          const md = median(pairs.map(q => q.d));
+          let a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0, n = 0;
+          pairs.forEach(q => {
+            if (Math.abs(q.d - md) > 0.25 * md) return;
+            const a = q.k * 2 * Math.PI / NA, ux = Math.cos(a), uy = Math.sin(a);
+            a11 += ux * ux; a12 += ux * uy; a22 += uy * uy; b1 += ux * q.s; b2 += uy * q.s; n++;
+          });
+          const det = a11 * a22 - a12 * a12;
+          if (n >= 3 && det > 1e-6) { cx += (a22 * b1 - a12 * b2) / det; cy += (a11 * b2 - a12 * b1) / det; }
+          r = md / 2;
+        } else r = median(valid);
+        if (r > 0.36 * Math.min(g.w, g.h)) { grow = true; break; }
+        const ring = [];
+        for (let k = 0; k < 48; k++) {
+          const a = k * 2 * Math.PI / 48;
+          for (let d = 1.8 * r; d <= 2.8 * r; d += 1) { const v = sampleAt(g, cx + Math.cos(a) * d, cy + Math.sin(a) * d); if (v >= 0) ring.push(v); }
+        }
+        if (ring.length) bg = median(ring);
+        mid = bg + 0.45 * (inner - bg);
+        okN = rad.filter(d => Number.isFinite(d) && Math.abs(d - r) < 0.35 * r).length;
+      }
+      if (grow) { half *= 2; continue; }
+      if (!Number.isFinite(r) || okN < 8) return { err: ERR.notfound };
+      if (inner - bg < 25) return { err: ERR.contrast };
+      const rv = r / g.kx;
+      if (rv < 3) return { err: ERR.small };
+      const seed = { x: g.x0 + (cx + 0.5) / g.kx, y: g.y0 + (cy + 0.5) / g.ky, r: rv, t: vid.currentTime };
+      const D = detectBalls(seed, null) || [];
+      const q = D.filter(d => Math.hypot(d.x - seed.x, d.y - seed.y) < 1.5 * rv).sort((a, b) => b.sc - a.sc)[0];
+      if (!q) return { err: ERR.contrast };
+      seed.ref = { sc: q.sc, mi: q.mi };
+      return seed;
+    }
+    return { err: ERR.big };
+  }
+
+  // Watches the start spot frame by frame: ball at rest -> ball leaves -> follow it ~34 cm -> wait for the next ball.
+  function makeTracker(seed) {
+    const r = seed.r, ref = seed.ref, sc = settings.scale;
+    const mmPerPx = BALL_MM / (2 * r);
+    const mps2px = v => v * 1000 / mmPerPx / sc;
+    const real = dt => dt / sc;
+    const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const roi = cropBox(seed.x, seed.y, ROI_R * r);
+    const nearEdge = q => {
+      const m = 2.2 * r;
+      return q.x - roi.x0 < m || q.y - roi.y0 < m || roi.x0 + roi.w - q.x < m || roi.y0 + roi.h - q.y < m;
+    };
+    let st = 'wait', restStart = 0, restT = 0, c0 = null, track = [], restPts = [];
+    function finish() {
+      const tr = track; track = []; st = 'wait';
+      const pts = tr.slice(1);
+      if (pts.length < 3) return null;
+      const d = pts.map(p => hyp(p, c0));
+      if (d[d.length - 1] < 4 * r) return null;
+      for (let i = 1; i < d.length; i++) if (d[i] < d[i - 1] - 0.3 * r) return null;
+      return { ok: true, c0: { x: c0.x, y: c0.y }, tRest: tr[0].t, pts, tImpact: (tr[0].t + pts[0].t) / 2 };
+    }
+    function step(t, D) {
+      if (st === 'move') {
+        const L = track[track.length - 1], P2 = track[track.length - 2], dtm = t - L.t;
+        // Only look ahead of the ball along its line, so the putter following behind is never picked.
+        let ux = L.x - c0.x, uy = L.y - c0.y;
+        const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+        const sL = ul, maxAhead = mps2px(6) * dtm + r;
+        const C = D.filter(c => {
+          const dx = c.x - c0.x, dy = c.y - c0.y, sp = dx * ux + dy * uy, lat = Math.abs(dy * ux - dx * uy);
+          return sp >= sL - 0.3 * r && sp <= sL + maxAhead && lat <= 1.2 * r + 0.08 * sp;
+        });
+        let q = null;
+        if (track.length === 2) {
+          // Speed is still unknown right after impact: take the most ball-like candidate.
+          C.forEach(c => { if (c.sc >= 0.6 * ref.sc && (!q || c.sc > q.sc)) q = c; });
+        } else {
+          const vx = (L.x - P2.x) / (L.t - P2.t), vy = (L.y - P2.y) / (L.t - P2.t);
+          const px = L.x + vx * dtm, py = L.y + vy * dtm, win = 0.6 * Math.hypot(vx, vy) * dtm + 1.5 * r;
+          let bd = Infinity;
+          C.forEach(c => { const dd = Math.hypot(c.x - px, c.y - py); if (dd <= win && dd < bd) { bd = dd; q = c; } });
+        }
+        if (q) {
+          if (nearEdge(q)) return finish();
+          track.push({ t, x: q.x, y: q.y });
+          // Stopped: has barely moved over the last 0.1 s (time-based, so it works at any frame rate).
+          let back = null;
+          for (let k = track.length - 2; k >= 1; k--) if (real(t - track[k].t) >= 0.1) { back = track[k]; break; }
+          const stalled = !!back && hyp(q, back) < 0.5 * r;
+          if (hyp(q, c0) >= STOP_R * r || stalled) return finish();
+          return null;
+        }
+        return real(t - L.t) > 0.1 ? finish() : null;
+      }
+      const near = st === 'rest'
+        ? D.filter(q => hyp(q, c0) < 0.6 * r)
+        : D.filter(q => hyp(q, seed) < 1.5 * r);
+      if (near.length) {
+        const q = near.reduce((a, b) => (b.sc > a.sc ? b : a));
+        if (st === 'wait') { st = 'rest'; restStart = t; restPts = []; }
+        restPts.push(q); if (restPts.length > 6) restPts.shift();
+        c0 = { x: restPts.reduce((a, p) => a + p.x, 0) / restPts.length, y: restPts.reduce((a, p) => a + p.y, 0) / restPts.length };
+        restT = t;
+        return null;
+      }
+      if (st !== 'rest') return null;
+      if (real(restT - restStart) < 0.25) { if (real(t - restT) > 0.15) st = 'wait'; return null; }
+      const maxStep = mps2px(6) * (t - restT) + r;
+      const C = D.filter(q => hyp(q, c0) <= maxStep && q.sc >= 0.6 * ref.sc);
+      if (C.length) {
+        const q = C.reduce((a, b) => (b.sc > a.sc ? b : a));
+        // The most ball-like thing has barely moved yet (high frame rates): wait a frame rather than grab the putter.
+        if (hyp(q, c0) < 0.9 * r) return null;
+        track = [{ t: restT, x: c0.x, y: c0.y }, { t, x: q.x, y: q.y }];
+        st = 'move';
+        return null;
+      }
+      if (real(t - restT) > 0.15) st = 'wait';
+      return null;
+    }
+    return {
+      step,
+      flush: () => (st === 'move' ? finish() : null),
+      current: () => (st === 'move' ? track.slice() : null),
+      rest: () => (st === 'rest' ? c0 : null),
+      state: () => st
+    };
+  }
+
+  function angleFor(b, P) {
+    if (P.view === 'top') {
+      if (!P.target) return null;
+      const t = { x: P.target.b.x - P.target.a.x, y: P.target.b.y - P.target.a.y };
+      let ang = Math.atan2(t.x * b.y - t.y * b.x, t.x * b.x + t.y * b.y) * 180 / Math.PI;
+      if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
+      return { ang };
+    }
+    let g = P.ground ? { x: P.ground.b.x - P.ground.a.x, y: P.ground.b.y - P.ground.a.y } : { x: 1, y: 0 };
+    if (g.x * b.x + g.y * b.y < 0) g = { x: -g.x, y: -g.y };
+    let nrm = { x: -g.y, y: g.x };
+    if (nrm.y > 0) nrm = { x: -nrm.x, y: -nrm.y };
+    return { ang: Math.atan2(nrm.x * b.x + nrm.y * b.y, g.x * b.x + g.y * b.y) * 180 / Math.PI, defaultGround: !P.ground };
+  }
+
+  function linFit(arr) {
+    const n = arr.length, mt = arr.reduce((a, p) => a + p.tau, 0) / n, ms = arr.reduce((a, p) => a + p.s, 0) / n;
+    let sxx = 0, sxy = 0;
+    arr.forEach(p => { sxx += (p.tau - mt) * (p.tau - mt); sxy += (p.tau - mt) * (p.s - ms); });
+    const b = sxx > 0 ? sxy / sxx : NaN;
+    return { b, c: ms - b * mt };
+  }
+  // s = c0 + c1·x + c2·x², least squares (x = tau - x0 for conditioning)
+  function quadFit(arr, x0) {
+    let S0 = 0, S1 = 0, S2 = 0, S3 = 0, S4 = 0, T0 = 0, T1 = 0, T2 = 0;
+    arr.forEach(p => { const x = p.tau - x0, x2 = x * x; S0++; S1 += x; S2 += x2; S3 += x2 * x; S4 += x2 * x2; T0 += p.s; T1 += p.s * x; T2 += p.s * x2; });
+    const det = S0 * (S2 * S4 - S3 * S3) - S1 * (S1 * S4 - S3 * S2) + S2 * (S1 * S3 - S2 * S2);
+    if (!(Math.abs(det) > 1e-18)) return null;
+    const c0 = (T0 * (S2 * S4 - S3 * S3) - S1 * (T1 * S4 - S3 * T2) + S2 * (T1 * S3 - S2 * T2)) / det;
+    const c1 = (S0 * (T1 * S4 - T2 * S3) - T0 * (S1 * S4 - S3 * S2) + S2 * (S1 * T2 - T1 * S2)) / det;
+    const c2 = (S0 * (S2 * T2 - S3 * T1) - S1 * (S1 * T2 - S2 * T1) + T0 * (S1 * S3 - S2 * S2)) / det;
+    return { c0, c1, c2 };
+  }
+
+  // Speed, roll and angle for one tracked putt with the current settings (stimp, target line and calibration can change afterwards).
+  function runMetrics(run) {
+    const P = tabs.putt;
+    if (!run.ok || !P.seed || !run.pts || run.pts.length < 2) return null;
+    const sc = settings.scale, c0 = run.c0, pts = run.pts;
+    let mmPerPx = BALL_MM / (2 * P.seed.r);
+    if (P.calib) { const cpx = dist(P.calib.a, P.calib.b); if (cpx > 1) mmPerPx = (settings.calMode === 'ball' ? BALL_MM : settings.calLen * 10) / cpx; }
+    const last = pts[pts.length - 1];
+    let ux = last.x - c0.x, uy = last.y - c0.y;
+    const L = Math.hypot(ux, uy) || 1; ux /= L; uy /= L;
+    const S = pts.map(p => ({ tau: (p.t - run.tRest) / sc, s: ((p.x - c0.x) * ux + (p.y - c0.y) * uy) * mmPerPx / 1000 }));
+    // Windows are in seconds, so 60fps uses twice as many points as 30fps.
+    const within = (arr, from, span) => arr.filter(p => p.tau >= from - 1e-6 && p.tau <= from + span + 1e-6);
+    const early = within(S, S[0].tau, 0.05);
+    const pair = early.length >= 2 ? linFit(early).b : (S[1].s - S[0].s) / (S[1].tau - S[0].tau);
+    let v0 = NaN, tauI = NaN;
+    let first = within(S, S[0].tau, 0.14);
+    if (first.length < 4) first = S.slice(0, 4);
+    first = first.slice(0, 12);
+    if (first.length >= 4) {
+      const x0 = first[0].tau, q = quadFit(first, x0);
+      if (q && q.c2 < 0 && q.c2 > -4.5) {
+        const lo = -x0 - 0.02, hi = 0;
+        const disc = q.c1 * q.c1 - 4 * q.c2 * q.c0;
+        if (disc >= 0) {
+          const sq = Math.sqrt(disc);
+          [(-q.c1 + sq) / (2 * q.c2), (-q.c1 - sq) / (2 * q.c2)].forEach(x => { if (x >= lo && x <= hi && !(x <= tauI - x0)) tauI = x + x0; });
+        }
+        if (!Number.isFinite(tauI)) tauI = x0 - q.c0 / q.c1;
+        v0 = q.c1 + 2 * q.c2 * (tauI - x0);
+      }
+    }
+    if (!Number.isFinite(v0)) {
+      const lf = linFit(S.slice(0, 3));
+      v0 = lf.b; tauI = Number.isFinite(lf.b) && lf.b > 0 ? -lf.c / lf.b : S[0].tau / 2;
+    }
+    if (!(pair > 0)) return null;
+    if (!(v0 >= 0.9 * pair && v0 <= 1.6 * pair)) v0 = pair;
+    tauI = clamp(Number.isFinite(tauI) ? tauI : 0, 0, S[0].tau);
+    let tail = S.filter(p => p.tau >= S[S.length - 1].tau - 0.07 - 1e-6);
+    if (tail.length < 3) tail = S.slice(-3);
+    const vEnd = tail.length >= 2 ? linFit(tail).b : pair;
+    const a = STIMP_V * STIMP_V / (2 * settings.stimp * FT);
+    const sLast = S[S.length - 1].s;
+    const roll = sLast + (vEnd > 0 ? vEnd * vEnd / (2 * a) : 0);
+    const ag = angleFor({ x: ux, y: uy }, P);
+    return { v0, roll, vEnd, ang: ag ? ag.ang : null, defaultGround: ag ? !!ag.defaultGround : false, tImpact: run.tRest + tauI * sc };
+  }
+  function summary(rows) {
+    const ms = rows.filter(r => r.ok && !r.ex).map(r => r.m), n = ms.length;
+    if (!n) return { n: 0 };
+    const mean = a => a.reduce((s, x) => s + x, 0) / a.length;
+    const sd = (a, mu) => a.length > 1 ? Math.sqrt(a.reduce((s, x) => s + (x - mu) * (x - mu), 0) / (a.length - 1)) : 0;
+    const vs = ms.map(m => m.v0), v = mean(vs);
+    const as = ms.filter(m => m.ang != null).map(m => m.ang), am = as.length ? mean(as) : null;
+    return { n, v, cv: v > 0 ? sd(vs, v) / v * 100 : 0, roll: mean(ms.map(m => m.roll)), ang: am, angSd: as.length > 1 ? sd(as, am) : null, defaultGround: ms.some(m => m.defaultGround) };
+  }
+
+  /* ---------- live camera ---------- */
+  let stream = null, running = false, tracker = null, runs = [], lastRun = null;
+  let restSince = null, beeped = false, curDropped = 0, confirmFails = 0;
+  const DROP_WARN = 2;   // missed frames around one putt before it is flagged as less precise
+  const ang1 = a => Math.round(Math.abs(a) * 10) / 10;
+  let tBase = null, lastT = null, gaps = [], fpsLive = null, lastDims = '', live = { D: [], track: null, rest: null };
+  let armed = null, lastStageW = -1;
+  const real = dt => dt;
+
+  function fpsFromGaps(g) {
+    const mn = Math.min(...g);
+    if (!(mn > 0.002)) return null;
+    const ok = g.filter(x => x <= 1.5 * mn), f = ok.length / ok.reduce((a, x) => a + x, 0);
+    return [24, 25, 30, 48, 50, 60, 90, 120, 240].find(v => Math.abs(f - v) / v < 0.04) || f;
+  }
+
+  function camError(e) {
+    const n = e && e.name;
+    if (!window.isSecureContext || !navigator.mediaDevices) return '카메라는 https 주소에서만 켜져요. 사이트 주소로 다시 열어주세요.';
+    if (n === 'NotAllowedError' || n === 'SecurityError') return '카메라 권한이 막혀 있어요. 주소창 옆 사이트 설정에서 카메라를 허용한 뒤 다시 눌러주세요.';
+    if (n === 'NotFoundError' || n === 'OverconstrainedError') return '카메라를 찾지 못했어요. 설정에서 카메라를 기본 후면 카메라로 바꿔보세요.';
+    if (n === 'NotReadableError') return '다른 앱이 카메라를 쓰고 있어요. 카메라 앱을 닫고 다시 눌러주세요.';
+    return '카메라를 켜지 못했어요. 페이지를 새로 고친 뒤 다시 해보세요.';
+  }
+
+  async function startCamera() {
+    stopCamera();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setHint(camError(null), true); return; }
+    const fps = +settings.fps || 30;
+    const video = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: fps, max: fps } };
+    if (settings.deviceId) video.deviceId = { exact: settings.deviceId }; else video.facingMode = { ideal: 'environment' };
+    setHint('카메라를 켜는 중…');
+    try {
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: false, video }); }
+      catch (e) {
+        if (!settings.deviceId) throw e;
+        delete video.deviceId; video.facingMode = { ideal: 'environment' };
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+      }
+    } catch (e) { stream = null; setHint(camError(e), true); return; }
+    vid.srcObject = stream;
+    try { await vid.play(); } catch (e) {}
+    tBase = null; lastT = null; gaps = []; fpsLive = null; lastDims = '';
+    listCameras();
+    frameLoop();
+    updateAll();
+  }
+  function stopCamera() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    vid.srcObject = null;
+  }
+  async function listCameras() {
+    try {
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      const sel = $('#camSel'), cur = settings.deviceId;
+      sel.textContent = '';
+      const def = document.createElement('option'); def.value = ''; def.textContent = '기본 후면 카메라'; sel.appendChild(def);
+      devs.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || `카메라 ${i + 1}`; sel.appendChild(o); });
+      sel.value = devs.some(d => d.deviceId === cur) ? cur : '';
+    } catch (e) {}
+  }
+
+  // Camera frames carry their own capture time; use it so speeds don't depend on screen timing.
+  function frameTime(md, now) {
+    if (tBase == null) tBase = md && Number.isFinite(md.captureTime) && md.captureTime > 0 ? 'capture' : md && Number.isFinite(md.mediaTime) && md.mediaTime > 0 ? 'media' : 'now';
+    if (tBase === 'capture' && md && Number.isFinite(md.captureTime)) return md.captureTime / 1000;
+    if (tBase === 'media' && md && Number.isFinite(md.mediaTime)) return md.mediaTime;
+    return now / 1000;
+  }
+  function frameLoop() {
+    const myStream = stream;
+    if (hasRVFC) {
+      const cb = (now, md) => { if (stream !== myStream || !stream) return; onFrame(frameTime(md, now)); vid.requestVideoFrameCallback(cb); };
+      vid.requestVideoFrameCallback(cb);
+    } else {
+      tBase = 'now';
+      let lastCt = -1;
+      const f = now => { if (stream !== myStream || !stream) return; if (vid.currentTime !== lastCt) { lastCt = vid.currentTime; onFrame(now / 1000); } requestAnimationFrame(f); };
+      requestAnimationFrame(f);
+    }
+  }
+
+  function onFrame(t) {
+    if (!vid.videoWidth) return;
+    const dims = vid.videoWidth + 'x' + vid.videoHeight;
+    if (dims !== lastDims) { const first = !lastDims; lastDims = dims; lastStageW = -1; layoutStage(); onDims(first); }
+    let gap = null;
+    if (lastT != null && t > lastT) { gap = t - lastT; gaps.push(gap); if (gaps.length > 90) gaps.shift(); }
+    lastT = t;
+    if (gaps.length >= 8 && (!fpsLive || gaps.length % 30 === 0)) { fpsLive = fpsFromGaps(gaps); if (fpsLive) frameDur = 1 / fpsLive; renderFps(); }
+    if (running && S.seed) measureFrame(t, gap);
+    draw();
+  }
+
+  function onDims(first) {
+    const sv = loadSetup();
+    if (S.seed && !first) {
+      // Phone rotated or camera changed: the old start spot no longer lines up.
+      S.seed = null; S.target = null; S.ground = null; S.tool = 'seed';
+      if (running) stopRun(true);
+      S.note = { text: '화면 방향이나 카메라가 바뀌어서 출발 자리를 다시 찍어야 해요.', warn: true };
+    } else if (!S.seed && sv && sv.vw === vid.videoWidth && sv.vh === vid.videoHeight && sv.seed) {
+      S.seed = { x: sv.seed.x, y: sv.seed.y, r: sv.seed.r, ref: sv.seed.ref || null, t: 0, restored: true };
+      S.target = sv.target || null; S.ground = sv.ground || null;
+      if (sv.view === 'top' || sv.view === 'side') S.view = sv.view;
+      S.tool = 'seed';
+      S.note = { text: '지난번 출발 자리와 목표선을 불러왔어요. 바로 측정 시작을 누르면 돼요. 삼각대를 옮겼다면 출발 자리의 공을 다시 눌러주세요.' };
+    }
+    updateAll();
+  }
+
+  /* ---------- saved setup ---------- */
+  function loadSetup() { try { return JSON.parse(localStorage.getItem('live.puttSetup') || 'null'); } catch (e) { return null; } }
+  function saveSetup() {
+    if (!vid.videoWidth) return;
+    const pick = o => (o ? JSON.parse(JSON.stringify(o)) : null);
+    const data = S.seed ? { vw: vid.videoWidth, vh: vid.videoHeight, seed: { x: S.seed.x, y: S.seed.y, r: S.seed.r, ref: pick(S.seed.ref) }, target: pick(S.target), ground: pick(S.ground), view: S.view } : null;
+    try { localStorage.setItem('live.puttSetup', JSON.stringify(data)); } catch (e) {}
+  }
+
+  /* ---------- measuring ---------- */
+  function startRun() {
+    if (!stream || !S.seed) return;
+    unlockSound();
+    running = true; curDropped = 0; restSince = null; beeped = false; confirmFails = 0;
+    tracker = makeTracker(S.seed);
+    keepAwake(true);
+    speak('측정을 시작할게요');
+    S.note = null;
+    updateAll();
+  }
+  function stopRun(silent) {
+    running = false; tracker = null; live = { D: [], track: null, rest: null };
+    keepAwake(false);
+    if (!silent) S.note = runs.length ? { text: `측정을 멈췄어요. 이번에 ${runs.length}개를 쟀어요.` } : null;
+    updateAll();
+  }
+
+  function measureFrame(t, gap) {
+    const seed = S.seed;
+    const D = detectBalls(seed, seed.restored ? null : seed.ref) || [];
+    const prevState = tracker.state();
+    if (gap != null && fpsLive && prevState !== 'wait') { const miss = Math.round(gap * fpsLive) - 1; if (miss > 0) curDropped += miss; }
+    const res = tracker.step(t, D);
+    const st = tracker.state(), rest = tracker.rest();
+    if (rest) { if (restSince == null) restSince = t; } else { restSince = null; if (st !== 'move') beeped = false; }
+    if (st === 'wait' && prevState !== 'move') curDropped = 0;
+    live.D = D; live.track = tracker.current(); live.rest = rest;
+
+    if (rest && restSince != null && t - restSince >= 0.3) {
+      if (seed.restored) { confirmSeed(rest); return; }
+      if (!beeped) { beeped = true; if (settings.beep) beep(); setPill('ready', '준비됨 · 퍼팅하세요'); }
+    }
+    if (st === 'move') setPill('move', '공을 따라가는 중');
+    else if (!rest) setPill('wait', '공을 출발 자리에 놓으세요');
+    if (res) onPutt(res);
+  }
+
+  // A start spot carried over from last time is checked on the first resting ball; small tripod moves are re-measured.
+  function confirmSeed(c0) {
+    const old = S.seed, s2 = seedBall(c0);
+    let moved = false;
+    if (!s2.err && Math.abs(s2.r - old.r) <= 0.25 * old.r) {
+      if (Math.hypot(s2.x - old.x, s2.y - old.y) > 0.5 * old.r || Math.abs(s2.r - old.r) > 0.08 * old.r) { S.seed = s2; moved = true; }
+      else S.seed = { x: old.x, y: old.y, r: old.r, t: s2.t, ref: s2.ref };
+    } else {
+      if (++confirmFails < 3) { restSince = null; return; }
+      S.seed = null; S.tool = 'seed';
+      stopRun(true);
+      S.note = { text: '저장된 출발 자리에서 공을 찾지 못했어요. 출발 자리에 놓인 공을 다시 눌러주세요.', warn: true };
+      speak('출발 자리를 다시 찍어주세요');
+      updateAll();
+      return;
+    }
+    tracker = makeTracker(S.seed); restSince = null; beeped = false;
+    saveSetup();
+    if (moved) { S.note = { text: '삼각대 위치가 조금 바뀌어서 출발 자리를 새로 잡았어요. 목표선이 맞는지 확인해주세요.', warn: true }; speak('출발 자리를 새로 잡았어요'); }
+    updateAll();
+  }
+
+  function metricsFor(run) {
+    const keep = S.seed;
+    S.seed = run.seed;
+    try { return runMetrics(run); } finally { S.seed = keep; }
+  }
+  function onPutt(run) {
+    run.seed = { x: S.seed.x, y: S.seed.y, r: S.seed.r };
+    run.dropped = curDropped >= DROP_WARN; curDropped = 0;
+    const m = metricsFor(run);
+    if (!m || !(m.v0 > 0.2 && m.v0 < 8)) return;
+    runs.push(run); lastRun = run;
+    speak(sayText(m, run.dropped));
+    setPill('wait', '측정 완료 · 다음 공을 놓으세요');
+    renderResults();
+  }
+
+  function diffInfo(m) {
+    if (!(settings.target > 0)) return null;
+    const d = m.roll - settings.target, cm = Math.round(Math.abs(d) * 100), tol = Math.max(5, settings.target * 3);
+    return { d, cm, hit: cm <= tol, word: cm <= tol ? '딱 맞아요' : d < 0 ? '짧아요' : '길어요' };
+  }
+  function sayText(m, dropped) {
+    const p = [], say = settings.say;
+    if (say.speed) p.push(`스피드 ${m.v0.toFixed(1)}`);
+    if (say.dist) p.push(`${m.roll.toFixed(1)}미터`);
+    if (say.dir && m.ang != null) {
+      const a = ang1(m.ang);
+      if (S.view === 'top') p.push(a === 0 ? '똑바로' : `${m.ang > 0 ? '오른쪽' : '왼쪽'} ${a.toFixed(1)}도`);
+      else p.push(`발사각 ${m.ang.toFixed(1)}도`);
+    }
+    const di = diffInfo(m);
+    if (say.diff && di) p.push(di.hit ? '거리 딱 맞아요' : `${di.cm}센티 ${di.word}`);
+    if (dropped) p.push('프레임이 빠져서 덜 정확해요');
+    return p.join(', ');
+  }
+
+  /* ---------- sound ---------- */
+  let audioCtx = null, koVoice = null;
+  function pickVoice() { try { const vs = window.speechSynthesis ? speechSynthesis.getVoices() : []; koVoice = vs.find(v => /^ko/i.test(v.lang)) || null; } catch (e) {} }
+  if ('speechSynthesis' in window) { pickVoice(); try { speechSynthesis.addEventListener('voiceschanged', pickVoice); } catch (e) {} }
+  function unlockSound() {
+    try { const AC = window.AudioContext || window.webkitAudioContext; if (AC && !audioCtx) audioCtx = new AC(); if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) {}
+  }
+  function beep() {
+    const a = audioCtx; if (!a) return;
+    try {
+      const o = a.createOscillator(), g = a.createGain(), t0 = a.currentTime;
+      o.type = 'sine'; o.frequency.value = 1320;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.3, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+      o.connect(g); g.connect(a.destination); o.start(t0); o.stop(t0 + 0.2);
+    } catch (e) {}
+  }
+  function speak(text) {
+    if (!text || !('speechSynthesis' in window)) return;
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'ko-KR'; if (koVoice) u.voice = koVoice; u.rate = 1.05;
+      speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+  let wake = null;
+  async function keepAwake(on) {
+    try {
+      if (on && !wake && navigator.wakeLock) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); }
+      else if (!on && wake) { const w = wake; wake = null; await w.release(); }
+    } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && running) keepAwake(true); });
+
+  /* ---------- layout & taps ---------- */
+  function layoutStage() {
+    const has = !!(stream && vid.videoWidth);
+    stage.classList.toggle('empty', !has);
+    if (!has) { stage.style.width = ''; stage.style.aspectRatio = ''; lastStageW = -1; return; }
+    const vw = vid.videoWidth, vh = vid.videoHeight, ar = vw / vh;
+    const avail = stage.parentElement.clientWidth, maxH = Math.max(260, window.innerHeight * 0.62);
+    const w = Math.floor(Math.min(avail, maxH * ar));
+    if (w !== lastStageW) { stage.style.aspectRatio = vw + ' / ' + vh; stage.style.width = w + 'px'; lastStageW = w; }
+    const r = cv.getBoundingClientRect();
+    if (Math.abs(r.width - cssW) > 0.5 || Math.abs(r.height - cssH) > 0.5 || cv.width <= 1) {
+      cssW = r.width; cssH = r.height;
+      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+      cv.width = Math.max(1, Math.round(r.width * dpr)); cv.height = Math.max(1, Math.round(r.height * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+  }
+  try { new ResizeObserver(() => { lastStageW = -1; layoutStage(); }).observe(stage.parentElement); } catch (e) { window.addEventListener('resize', () => { lastStageW = -1; layoutStage(); }); }
+
+  function evPt(e) {
+    const r = cv.getBoundingClientRect();
+    return { x: clamp((e.clientX - r.left) / r.width, 0, 1) * vid.videoWidth, y: clamp((e.clientY - r.top) / r.height, 0, 1) * vid.videoHeight };
+  }
+  cv.addEventListener('pointerdown', e => {
+    if (!stream || !vid.videoWidth) return;
+    e.preventDefault();
+    if (running) { setHint('측정을 멈춘 뒤에 출발 자리나 목표선을 바꿀 수 있어요.', true); return; }
+    try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    drag = { p: evPt(e) }; draw();
+  });
+  cv.addEventListener('pointermove', e => { if (!drag) return; e.preventDefault(); drag.p = evPt(e); draw(); });
+  const endDrag = e => { if (!drag) return; const p = drag.p; drag = null; if (e.type === 'pointerup') commit(p); else draw(); };
+  cv.addEventListener('pointerup', endDrag);
+  cv.addEventListener('pointercancel', endDrag);
+
+  function commit(p) {
+    S.note = null;
+    if (S.tool === 'seed') {
+      const s = seedBall(p);
+      if (s.err) { S.note = { text: s.err, warn: true }; updateAll(); return; }
+      S.seed = s;
+      if (!(S.view === 'top' ? S.target : S.ground)) S.tool = 'ref';
+      saveSetup(); updateAll(); return;
+    }
+    if (!S.pendingA) { S.pendingA = p; updateAll(); return; }
+    const line = { a: S.pendingA, b: p };
+    S.pendingA = null;
+    if (dist(line.a, line.b) < 10) { S.note = { text: '두 점을 더 멀리 떨어뜨려 찍어주세요.', warn: true }; updateAll(); return; }
+    if (S.view === 'top') S.target = line; else S.ground = line;
+    S.tool = S.seed ? 'ref' : 'seed';
+    saveSetup(); updateAll();
+  }
+
+  /* ---------- drawing ---------- */
+  function draw() {
+    if (!cssW) return;
+    ctx.clearRect(0, 0, cssW, cssH);
+    if (!stream || !vid.videoWidth) return;
+    const kx = cssW / vid.videoWidth, ky = cssH / vid.videoHeight;
+    const Sx = p => [p.x * kx, p.y * ky];
+    drawRefCalib(S, Sx);
+    if (S.seed) {
+      const rpx = S.seed.r * kx, rest = live.rest;
+      ring(Sx(rest || S.seed), rpx * 1.6, C.ball, rest && beeped ? 2.6 : 1.5);
+      if (!running) tag('출발', Sx(S.seed)[0] + rpx * 1.6 + 4, Sx(S.seed)[1] - rpx * 1.6, C.ball);
+      if (live.track && live.track.length > 1) { const pts = live.track.map(Sx); path(pts); outlined(C.ball, 3); ring(pts[pts.length - 1], rpx, C.ball, 2.6); }
+      else if (lastRun && lastRun.pts && performance.now() - (lastRun.shownAt || 0) < 4000) {
+        const pts = [Sx(lastRun.c0)].concat(lastRun.pts.map(Sx));
+        ctx.save(); ctx.globalAlpha = 0.8; path(pts); outlined(C.ball, 2.5); ctx.restore();
+      }
+    }
+    if (S.pendingA) {
+      const a = Sx(S.pendingA), col = S.view === 'top' ? C.target : C.ground;
+      if (drag) { const b = Sx(drag.p); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); outlined(col, 2, [6, 5]); }
+      dot(a, col);
+    }
+    if (drag) loupe(drag.p, Sx, kx, ky);
+  }
+
+  /* ---------- UI ---------- */
+  function setHint(text, warn) { hintEl.textContent = text || ''; hintEl.classList.toggle('warn', !!warn); }
+  function setPill(s, text) { const p = $('#pill'); if (p.dataset.s !== s) p.dataset.s = s; const el = $('#pillText'); if (el.textContent !== text) el.textContent = text; }
+  function renderFps() {
+    const b = $('#fpsBadge'), want = +settings.fps;
+    b.textContent = fpsLive ? `${Math.round(fpsLive)}fps` : '';
+    b.style.color = fpsLive && want && Math.abs(fpsLive - want) / want > 0.15 ? '#F0A35E' : '';
+  }
+  function updateHint() {
+    if (S.note) { setHint(S.note.text, !!S.note.warn); return; }
+    if (!stream) { setHint(''); return; }
+    if (running) {
+      const want = +settings.fps;
+      setHint(fpsLive && want === 60 && fpsLive < 45 ? '이 폰 브라우저에서는 카메라가 30fps로 찍혀요. 측정은 그대로 돼요.' : '공을 출발 자리에 놓고 멈추면 띵 소리가 나요. 그다음 퍼팅하세요.');
+      return;
+    }
+    if (S.tool === 'seed') { setHint(S.seed ? '준비됐어요. 측정 시작을 누르세요. 출발 자리를 바꾸려면 공을 다시 누르세요.' : '출발 자리에 놓인 공을 누르세요. 공 크기로 거리를 자동으로 맞춰요.'); return; }
+    if (S.pendingA) { setHint(S.view === 'top' ? '홀 쪽으로 두 번째 점을 누르세요.' : '두 번째 점을 누르세요.'); return; }
+    if (S.view === 'top') setHint(S.target ? '준비됐어요. 측정 시작을 누르세요.' : '목표선을 그어요. 매트 선 위에 공 앞쪽과 먼 쪽 두 점을 누르세요. 방향이 필요 없으면 바로 시작해도 돼요.');
+    else setHint(S.ground ? '준비됐어요. 측정 시작을 누르세요.' : '지면선을 그어요. 퍼팅 면을 따라 두 점을 누르세요.');
+  }
+  function renderControls() {
+    $$('[data-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === S.view)));
+    $('#refName').textContent = S.view === 'top' ? '목표선' : '지면선';
+    $$('[data-tool]').forEach(b => {
+      b.setAttribute('aria-pressed', String(!running && b.dataset.tool === S.tool));
+      b.classList.toggle('ok', b.dataset.tool === 'seed' ? !!S.seed : !!(S.view === 'top' ? S.target : S.ground));
+      b.disabled = running || !stream;
+    });
+    $$('[data-view]').forEach(b => { b.disabled = running; });
+    const go = $('#run');
+    go.textContent = running ? '측정 멈추기' : '측정 시작';
+    go.classList.toggle('stop', running);
+    go.disabled = !running && !(stream && S.seed);
+    if (!stream) setPill('off', '카메라 꺼짐');
+    else if (!running) setPill(S.seed ? 'wait' : 'warn', S.seed ? '측정 대기' : '출발 자리 필요');
+  }
+
+  const fmtAngTxt = a => a == null ? '—' : S.view === 'side' ? (a > 0 ? '+' : '') + a.toFixed(1) + '°' : ang1(a) === 0 ? '0.0°' : (a > 0 ? '오 ' : '왼 ') + ang1(a).toFixed(1) + '°';
+  function put(id, v, s) { $('#' + id).textContent = v; if (s != null) $('#' + id + 'S').textContent = s; }
+  function renderResults() {
+    const last = $('#last'), ex = !lastRun;
+    last.classList.toggle('example', ex); $('#lastEx').hidden = !ex;
+    $('#lAngK').textContent = S.view === 'top' ? '출발 방향' : '발사각';
+    $('#runsAngH').textContent = S.view === 'top' ? '방향' : '발사각';
+    const tile = $('#lDiffTile'); tile.classList.remove('short', 'long', 'hit');
+    if (!ex) {
+      const m = metricsFor(lastRun);
+      $('#lastNo').textContent = `· ${runs.indexOf(lastRun) + 1}번`;
+      if (m) {
+        put('lSpeed', m.v0.toFixed(2), `${(m.v0 * MPH).toFixed(1)} mph · 임팩트 직후` + (lastRun.dropped ? ' · 프레임 누락' : ''));
+        put('lRoll', m.roll.toFixed(1), `${(m.roll / FT).toFixed(1)} ft · 스팀프 ${fmtNum(settings.stimp)} 기준`);
+        if (m.ang == null) put('lAng', '—', S.view === 'top' ? '목표선을 그으면 나와요' : '—');
+        else if (S.view === 'top') { const a = ang1(m.ang); put('lAng', a.toFixed(1), a === 0 ? '목표선과 일치' : m.ang > 0 ? '목표선 오른쪽' : '목표선 왼쪽'); }
+        else put('lAng', (m.ang > 0 ? '+' : '') + m.ang.toFixed(1), m.ang >= 0 ? '위로 떠서 출발' : '눌려서 출발');
+        const di = diffInfo(m);
+        if (di) { $('#lDiffU').textContent = 'cm'; put('lDiff', di.hit ? '±' + di.cm : (di.d < 0 ? '−' : '+') + di.cm, `목표 ${fmtNum(settings.target)}m · ${di.word}`); tile.classList.add(di.hit ? 'hit' : di.d < 0 ? 'short' : 'long'); }
+        else { $('#lDiffU').textContent = ''; put('lDiff', '—', '설정에서 목표 거리를 정하세요'); }
+      }
+    } else $('#lastNo').textContent = '';
+    renderRuns();
+  }
+  function renderRuns() {
+    const body = $('#runsBody'); body.textContent = '';
+    const rows = runs.map((r, i) => ({ i, ok: true, ex: !!r.ex, m: metricsFor(r), dropped: r.dropped }));
+    if (!rows.length) {
+      const p = document.createElement('p'); p.className = 'runs-empty';
+      p.textContent = '측정을 시작하면 퍼팅마다 한 줄씩 쌓여요.';
+      body.appendChild(p);
+    }
+    rows.slice().reverse().forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'run' + (r.ex ? ' excl' : '');
+      const di = r.m ? diffInfo(r.m) : null;
+      const cells = [String(r.i + 1) + (r.dropped ? '!' : ''), r.m ? r.m.v0.toFixed(2) : '—', r.m ? fmtAngTxt(r.m.ang) : '—', r.m ? r.m.roll.toFixed(1) + 'm' : '—', di ? (di.hit ? '맞음' : (di.d < 0 ? '−' : '+') + di.cm + 'cm') : '—'];
+      cells.forEach((c, ci) => { const s = document.createElement('span'); s.textContent = c; if (ci === 0 && r.dropped) { s.className = 'flag'; s.title = '프레임이 빠져서 덜 정확해요'; } row.appendChild(s); });
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'ex'; b.dataset.ex = r.i; b.textContent = r.ex ? '포함' : '제외';
+      b.setAttribute('aria-label', `${r.i + 1}번 퍼팅 ${r.ex ? '포함' : '제외'}`);
+      row.appendChild(b);
+      body.appendChild(row);
+    });
+    const s = summary(rows.filter(r => r.m));
+    const sum = $('#sum'); sum.textContent = '';
+    const add = (k, v) => { const sp = document.createElement('span'); sp.append(k + ' '); const b = document.createElement('b'); b.textContent = v; sp.appendChild(b); sum.appendChild(sp); };
+    if (s.n) {
+      add('퍼팅', `${s.n}개`);
+      add('평균 스피드', `${s.v.toFixed(2)} m/s`);
+      if (s.n >= 2) add('속도 편차', `±${s.cv.toFixed(1)}%`);
+      add('평균 거리', `${s.roll.toFixed(1)} m`);
+      if (s.ang != null) add('방향', `${S.view === 'top' ? (ang1(s.ang) === 0 ? '' : s.ang > 0 ? '오 ' : '왼 ') + ang1(s.ang).toFixed(1) : s.ang.toFixed(1)}°` + (s.angSd != null ? ` ±${s.angSd.toFixed(1)}°` : ''));
+    } else add('', '아직 기록이 없어요');
+  }
+
+  function updateAll() { renderControls(); updateHint(); renderResults(); draw(); }
+
+  /* ---------- wiring ---------- */
+  $('#camOn').addEventListener('click', () => { unlockSound(); startCamera(); });
+  $('#run').addEventListener('click', () => { if (running) stopRun(false); else startRun(); });
+  $$('[data-tool]').forEach(b => b.addEventListener('click', () => { if (running) return; S.tool = b.dataset.tool; S.pendingA = null; S.note = null; updateAll(); }));
+  $$('[data-view]').forEach(b => b.addEventListener('click', () => { if (running) return; S.view = b.dataset.view; S.pendingA = null; S.note = null; saveSetup(); updateAll(); }));
+  $('#reset').addEventListener('click', () => {
+    const b = $('#reset');
+    if (!armed) { b.textContent = '한 번 더 누르면 지워져요'; b.classList.add('armed'); armed = setTimeout(() => { armed = null; b.textContent = '설정 지우기'; b.classList.remove('armed'); }, 3000); return; }
+    clearTimeout(armed); armed = null; b.textContent = '설정 지우기'; b.classList.remove('armed');
+    if (running) stopRun(true);
+    S.seed = null; S.target = null; S.ground = null; S.pendingA = null; S.tool = 'seed'; S.note = null;
+    try { localStorage.removeItem('live.puttSetup'); } catch (e) {}
+    updateAll();
+  });
+  $('#clearRuns').addEventListener('click', () => { runs = []; lastRun = null; renderResults(); });
+  $('#runsBody').addEventListener('click', e => { const b = e.target.closest('.ex'); if (!b) return; const r = runs[+b.dataset.ex]; if (r) { r.ex = !r.ex; renderResults(); } });
+
+  const ids = { saySpeed: 'speed', sayDist: 'dist', sayDir: 'dir', sayDiff: 'diff' };
+  Object.keys(ids).forEach(id => { const el = $('#' + id); el.checked = !!settings.say[ids[id]]; el.addEventListener('change', () => { settings.say[ids[id]] = el.checked; saveSettings(); }); });
+  const beepEl = $('#beepOn'); beepEl.checked = !!settings.beep; beepEl.addEventListener('change', () => { settings.beep = beepEl.checked; saveSettings(); });
+  $('#testVoice').addEventListener('click', () => {
+    unlockSound(); if (settings.beep) beep();
+    const m = lastRun ? metricsFor(lastRun) : { v0: 2.02, roll: 2.1, ang: -0.7 };
+    setTimeout(() => speak(sayText(m, false)), 250);
+  });
+  const targetEl = $('#target'); targetEl.value = String(settings.target || 0);
+  targetEl.addEventListener('input', () => { const v = parseFloat(targetEl.value); if (v >= 0 && v <= 30) { settings.target = v; saveSettings(); renderResults(); } });
+  const stimpEl = $('#stimp'); stimpEl.value = String(settings.stimp);
+  stimpEl.addEventListener('input', () => { const v = parseFloat(stimpEl.value); if (v >= 3 && v <= 16) { settings.stimp = v; saveSettings(); renderResults(); } });
+  const fpsEl = $('#fpsSel'); fpsEl.value = settings.fps === '30' ? '30' : '60';
+  fpsEl.addEventListener('change', () => { settings.fps = fpsEl.value; saveSettings(); if (stream) { const was = running; if (was) stopRun(true); startCamera(); } });
+  const camEl = $('#camSel');
+  camEl.addEventListener('change', () => { settings.deviceId = camEl.value; saveSettings(); if (stream) { if (running) stopRun(true); startCamera(); } });
+
+  window.addEventListener('pagehide', () => { stopCamera(); keepAwake(false); });
+  updateAll();
+})();
+</script>
+</body>
+</html>
