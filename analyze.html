@@ -456,6 +456,7 @@ input[type=number]{width:7em}
     <li>60fps로 찍으면 퍼팅마다 잡히는 공 위치가 두 배로 늘어서 볼 스피드가 더 정확해져요. 프레임은 영상에 기록된 실제 시간으로 계산해서, 자동 감지로 두면 30fps와 60fps 모두 맞게 재요. 30fps나 60fps를 직접 고르면 영상이 다르게 찍혔을 때 알려줘요.</li>
     <li>볼 스피드는 임팩트 직후 속도예요. 공은 처음에 미끄러지며 빨리 느려지다가 구르기 시작해요. 화면에서 그 지점을 찾아 미끄러진 거리와 구르기 시작한 속도를 재고, 굴림 거리는 그 속도로 계산해요. 구름 효율은 구르기 시작할 때 속도가 출발 속도의 몇 %인지예요. 스핀 없이 맞은 공은 71%이고, 높을수록 덜 미끄러진 거예요.</li>
     <li>폰이 기울어 있으면 화면 먼 쪽의 거리가 줄어들거나 늘어나서 구르는 속도가 틀어져요. 폰 화면을 매트와 평행하게 맞춰 찍으세요.</li>
+    <li>세게 친 공은 화면에서 길게 번져 보여요. 공이 멈춰 있을 때의 화면을 배경으로 기억해뒀다가, 움직인 부분만 보고 번진 공을 찾아요. 그래도 밝은 곳에서 찍을수록 덜 번져서 잘 잡혀요.</li>
     <li>점을 누르고 있으면 확대경이 떠요. 손가락을 움직여 정확히 맞춘 뒤 떼세요. 컴퓨터에서는 ← → 키로 프레임을 넘길 수 있어요.</li>
     <li>예상 굴림 거리는 공이 일정하게 감속한다고 보고 계산한 추정치예요. 스팀프미터 경사대를 떠나는 공 속도(약 1.83m/s, 6ft/s)가 기준이에요.</li>
   </ul>
@@ -485,7 +486,7 @@ input[type=number]{width:7em}
     if (tab !== 'putt' || busy || P.restorePending || !P.src || !vid.videoWidth) return;
     const pick = o => (o ? JSON.parse(JSON.stringify(o)) : null);
     const data = P.seed
-      ? { vw: vid.videoWidth, vh: vid.videoHeight, seed: { x: P.seed.x, y: P.seed.y, r: P.seed.r, ref: pick(P.seed.ref) }, target: pick(P.target), ground: pick(P.ground), calib: pick(P.calib), view: P.view }
+      ? { vw: vid.videoWidth, vh: vid.videoHeight, seed: { x: P.seed.x, y: P.seed.y, r: P.seed.r, rs: P.seed.rs, ref: pick(P.seed.ref) }, target: pick(P.target), ground: pick(P.ground), calib: pick(P.calib), view: P.view }
       : null;
     const js = JSON.stringify(data);
     if (js === puttSetupJs) return;
@@ -495,7 +496,7 @@ input[type=number]{width:7em}
   function restorePuttSetup(P) {
     const sv = puttSetup;
     if (!sv || !sv.seed || sv.vw !== vid.videoWidth || sv.vh !== vid.videoHeight) return false;
-    P.seed = { x: sv.seed.x, y: sv.seed.y, r: sv.seed.r, ref: sv.seed.ref || null, t: 0, restored: true };
+    P.seed = { x: sv.seed.x, y: sv.seed.y, r: sv.seed.r, rs: sv.seed.rs, ref: sv.seed.ref || null, t: 0, restored: true };
     P.target = sv.target || null; P.ground = sv.ground || null; P.calib = sv.calib || null;
     if (sv.view === 'top' || sv.view === 'side') P.view = sv.view;
     P.note = { text: P.target || P.ground
@@ -1237,13 +1238,13 @@ input[type=number]{width:7em}
   let iiBuf = null;
 
   // Copy part of the current video frame at scale k. m = min(R,G,B): a white ball is bright, a green mat or grass is dark.
-  function grabK(x0, y0, w, h, k) {
+  function grabK(x0, y0, w, h, k, src) {
     const cw = Math.max(1, Math.round(w * k)), ch = Math.max(1, Math.round(h * k));
     if (ac.width !== cw || ac.height !== ch) { ac.width = cw; ac.height = ch; }
     let d;
     try {
       actx.imageSmoothingEnabled = true; actx.imageSmoothingQuality = 'high';
-      actx.drawImage(vid, x0, y0, w, h, 0, 0, cw, ch);
+      actx.drawImage(src || vid, x0, y0, w, h, 0, 0, cw, ch);
       d = actx.getImageData(0, 0, cw, ch).data;
     } catch (e) { return null; }
     const m = new Uint8Array(cw * ch);
@@ -1267,13 +1268,43 @@ input[type=number]{width:7em}
 
   // Blob detector: bright square core minus its surroundings. Thin lines, text and ring markings score low; a ball scores high.
   // Looks around the start spot, or inside `area` (the tracker's window around a moving ball).
+  // With area.bg (a picture of the same view without the ball), it looks at "now minus background" instead: mat lines,
+  // rings and print cancel out and only things that moved are left, so a fast ball smeared by motion blur, which is
+  // much dimmer than a ball at rest, can be accepted with a far lower score.
   function detectBalls(seed, ref, area) {
     if (!vid.videoWidth) return null;
     const b0 = area || cropBox(seed.x, seed.y, ROI_R * seed.r);
     const g = grabK(b0.x0, b0.y0, b0.w, b0.h, RS / seed.r);
     if (!g) return null;
-    const w = g.w, h = g.h, A = 4, B = 9, W1 = w + 1;
-    if (w <= 2 * B + 4 || h <= 2 * B + 4) return [];
+    const w = g.w, h = g.h;
+    if (w <= 2 * 9 + 4 || h <= 2 * 9 + 4) return [];
+    const toVid = o => ({ x: g.x0 + (o.cx + 0.5) / g.kx, y: g.y0 + (o.cy + 0.5) / g.ky });
+    const diff = !!(area && area.bg && ref);
+    if (!diff) {
+      const minSc = ref ? 0.45 * ref.sc : 18, minMi = ref ? ref.mi - 0.65 * ref.sc : 0;
+      return blobs(g.m, w, h, minSc, minMi).map(o => Object.assign(toVid(o), { sc: o.sc, mi: o.mi, diff: false }));
+    }
+    const gb = grabK(b0.x0, b0.y0, b0.w, b0.h, RS / seed.r, area.bg);
+    if (!gb || gb.w !== w || gb.h !== h) return [];
+    // The camera may shift its exposure a little: take the typical difference as zero.
+    const dm = new Uint8Array(w * h), hist = new Uint32Array(511);
+    for (let i = 0; i < dm.length; i++) hist[g.m[i] - gb.m[i] + 255]++;
+    let acc = 0, off = 0;
+    for (let v = 0; v < 511; v++) { acc += hist[v]; if (acc * 2 >= dm.length) { off = v - 255; break; } }
+    for (let i = 0; i < dm.length; i++) { const v = g.m[i] - gb.m[i] - off; dm[i] = v > 0 ? (v < 255 ? v : 255) : 0; }
+    // Found on the difference; but where the ball rolls over a white mark it partly vanishes there (white minus white),
+    // so its exact spot is taken from the normal picture whenever the ball also shows up there right at that place.
+    const D = blobs(dm, w, h, 0.18 * ref.sc, 0.18 * ref.sc);
+    const Rw = blobs(g.m, w, h, 0.25 * ref.sc, ref.mi - 0.85 * ref.sc);
+    return D.map(o => {
+      let best = null, bd = (0.7 * RS) * (0.7 * RS);
+      Rw.forEach(q => { const dd = (q.cx - o.cx) * (q.cx - o.cx) + (q.cy - o.cy) * (q.cy - o.cy); if (dd < bd) { bd = dd; best = q; } });
+      return Object.assign(toVid(best || o), { sc: o.sc, mi: o.mi, diff: true });
+    });
+  }
+  // Ball-shaped bright spots on a map at detector scale: bright square core minus its surroundings, strongest first.
+  function blobs(m, w, h, minSc, minMi) {
+    const A = 4, B = 9, W1 = w + 1;
     const need = W1 * (h + 1);
     if (!iiBuf || iiBuf.length < need) iiBuf = new Int32Array(need);
     const ii = iiBuf;
@@ -1281,7 +1312,7 @@ input[type=number]{width:7em}
     for (let y = 0; y < h; y++) {
       let row = 0;
       ii[(y + 1) * W1] = 0;
-      for (let x = 0; x < w; x++) { row += g.m[y * w + x]; ii[(y + 1) * W1 + x + 1] = ii[y * W1 + x + 1] + row; }
+      for (let x = 0; x < w; x++) { row += m[y * w + x]; ii[(y + 1) * W1 + x + 1] = ii[y * W1 + x + 1] + row; }
     }
     const box = (xa, ya, xb, yb) => ii[yb * W1 + xb] - ii[ya * W1 + xb] - ii[yb * W1 + xa] + ii[ya * W1 + xa];
     const ai = (2 * A + 1) * (2 * A + 1), ao = (2 * B + 1) * (2 * B + 1);
@@ -1289,7 +1320,6 @@ input[type=number]{width:7em}
       const si = box(x - A, y - A, x + A + 1, y + A + 1), so = box(x - B, y - B, x + B + 1, y + B + 1);
       return si / ai - (so - si) / (ao - ai);
     };
-    const minSc = ref ? 0.45 * ref.sc : 18, minMi = ref ? ref.mi - 0.65 * ref.sc : 0;
     const cand = [];
     for (let y = B + 1; y < h - B - 2; y++) for (let x = B + 1; x < w - B - 2; x++) {
       const si = box(x - A, y - A, x + A + 1, y + A + 1), so = box(x - B, y - B, x + B + 1, y + B + 1);
@@ -1310,8 +1340,9 @@ input[type=number]{width:7em}
       out.push({ px: x, py: y, cx: x + dx, cy: y + dy, sc: s0, mi: cand[i + 1] });
       if (out.length >= 16) break;
     }
-    return out.map(o => ({ x: g.x0 + (o.cx + 0.5) / g.kx, y: g.y0 + (o.cy + 0.5) / g.ky, sc: o.sc, mi: o.mi }));
+    return out;
   }
+
 
   // Ellipse through the edge rays (from opposite-ray diameters, so a slightly off-center origin doesn't matter).
   // 1/r² = A + B·cos2ψ + C·sin2ψ; a = short half-axis, b = long half-axis, ang = direction of the long axis.
@@ -1327,7 +1358,26 @@ input[type=number]{width:7em}
     if (!c) return null;
     const K = Math.hypot(c[1], c[2]);
     if (!(c[0] - K > 0)) return null;
-    return { a: 1 / Math.sqrt(c[0] + K), b: 1 / Math.sqrt(c[0] - K), ang: (0.5 * Math.atan2(c[2], c[1]) + Math.PI / 2) * 180 / Math.PI, n: use.length };
+    return { a: 1 / Math.sqrt(c[0] + K), b: 1 / Math.sqrt(c[0] - K), ang: (0.5 * Math.atan2(c[2], c[1]) + Math.PI / 2) * 180 / Math.PI, n: use.length, c,
+      rAt: psi => 1 / Math.sqrt(Math.max(1e-9, c[0] + c[1] * Math.cos(2 * psi) + c[2] * Math.sin(2 * psi))) };
+  }
+  // Ruler for distances: the ball's half-width across the direction from the picture center.
+  // A lens shows a ball away from the middle stretched toward the picture edge (like faces at the edge of a
+  // wide-angle photo), by up to 15% near the edge; across that direction it is not stretched and matches the scale
+  // of the mat. The mat line under the ball usually runs along the stretch, so it doesn't disturb this width either.
+  function scaleRadius(rad, NA, bx, by, rAll) {
+    const vw = vid.videoWidth, vh = vid.videoHeight, dx = bx - vw / 2, dy = by - vh / 2;
+    if (Math.hypot(dx, dy) < 0.12 * Math.hypot(vw, vh) / 2) return rAll;   // near the middle there is no stretch
+    const across = Math.atan2(dy, dx) + Math.PI / 2, half = NA / 2, D = [];
+    for (let k = 0; k < half; k++) {
+      if (!Number.isFinite(rad[k]) || !Number.isFinite(rad[k + half])) continue;
+      let dpsi = ((k * 2 * Math.PI / NA - across) % Math.PI + Math.PI) % Math.PI;
+      dpsi = Math.min(dpsi, Math.PI - dpsi);
+      if (dpsi <= Math.PI / 6 + 1e-6) D.push(rad[k] + rad[k + half]);
+    }
+    if (D.length < 2) return rAll;
+    const rt = median(D) / 2;
+    return rt >= 0.8 * rAll && rt <= 1.02 * rAll ? rt : rAll;
   }
   // Small dense least-squares solver (Gauss-Jordan with partial pivoting).
   function solveLin(M, v) {
@@ -1428,9 +1478,17 @@ input[type=number]{width:7em}
       const rv = r / g.kx;
       if (rv < 3) return { err: ERR.small };
       // round: share of edge rays within 10% of the radius. A ball scores about 0.9; a putter head or block about 0.4.
-      const round = lastRad.filter(d => Number.isFinite(d) && Math.abs(d - r) <= 0.1 * r).length / NA;
       const ell = ellipseOf(lastRad, NA);
-      const seed = { x: g.x0 + (cx + 0.5) / g.kx, y: g.y0 + (cy + 0.5) / g.ky, r: rv, t: vid.currentTime, round, ell: ell && { a: ell.a / g.kx, b: ell.b / g.kx, ang: ell.ang } };
+      let round = lastRad.filter(d => Number.isFinite(d) && Math.abs(d - r) <= 0.1 * r).length / NA;
+      // Near the picture edge a ball is a slightly stretched ellipse, not a circle: judge its outline against that ellipse.
+      // A putter head (much longer than wide) or a square block still fits poorly.
+      if (ell && ell.b / ell.a <= 1.3) {
+        const fitE = lastRad.filter((d, k) => { if (!Number.isFinite(d)) return false; const e = ell.rAt(k * 2 * Math.PI / NA); return Math.abs(d - e) <= 0.1 * e; }).length / NA;
+        round = Math.max(round, fitE);
+      }
+      const sx = g.x0 + (cx + 0.5) / g.kx, sy = g.y0 + (cy + 0.5) / g.ky;
+      // r (all directions) sizes the ball finder; rs (across the lens stretch) is the ruler for distances.
+      const seed = { x: sx, y: sy, r: rv, rs: scaleRadius(lastRad, NA, sx, sy, r) / g.kx, t: vid.currentTime, round, ell: ell && { a: ell.a / g.kx, b: ell.b / g.kx, ang: ell.ang } };
       const D = detectBalls(seed, null) || [];
       const q = D.filter(d => Math.hypot(d.x - seed.x, d.y - seed.y) < 1.5 * rv).sort((a, b) => b.sc - a.sc)[0];
       if (!q) return { err: ERR.contrast };
@@ -1441,9 +1499,9 @@ input[type=number]{width:7em}
   }
 
   // Watches the start spot frame by frame: ball at rest -> ball leaves -> follow it to the edge of the picture -> wait for the next ball.
-  function makeTracker(seed) {
+  function makeTracker(seed, hint) {
     const r = seed.r, ref = seed.ref, sc = settings.scale;
-    const mmPerPx = BALL_MM / (2 * r);
+    const mmPerPx = BALL_MM / (2 * (seed.rs || r));
     const mps2px = v => v * 1000 / mmPerPx / sc;
     const real = dt => dt / sc;
     const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -1452,9 +1510,57 @@ input[type=number]{width:7em}
       const m = 2.2 * r, vw = vid.videoWidth, vh = vid.videoHeight;
       return q.x < m || q.y < m || vw - q.x < m || vh - q.y < m;
     };
+    // Background: the whole view, taken every 0.4 s while a confirmed ball sits still, with the ball and its shadow
+    // painted over in the mat colour around it. From then on (the last moments at rest, the start and the whole roll)
+    // the ball is looked for in "now minus background" (see detectBalls).
+    let bgCv = null, bgFor = -1, bgAt = -Infinity;
+    // Which way is "behind": while the ball rests, things that move near it on the background-subtracted picture are the
+    // putter (address, backswing). Their average direction from the ball points backward; the ball leaves the other way.
+    // At impact a fast, blurred ball can look as dim as the putter head, so the departing ball is taken as the moving
+    // blob farthest forward, not the brightest one.
+    let backX = 0, backY = 0, backW = 0;
+    // Once a putt has been measured, its direction is known for sure and used for the next ones.
+    let lastDir = hint && hint.dir ? hint.dir : null;
+    // Best first: the last measured putt, then the target line (drawn from behind the ball toward the hole), then the
+    // putter's side. That last one is only rough (a wide putter head shows up as two blobs at its ends), so it is
+    // used without the check against wandering off to the side.
+    function forward() {
+      if (lastDir) return { x: lastDir.x, y: lastDir.y, sure: true };
+      const P = tabs.putt;
+      if (P.view === 'top' && P.target) { const dx = P.target.b.x - P.target.a.x, dy = P.target.b.y - P.target.a.y, l = Math.hypot(dx, dy); if (l > 1) return { x: dx / l, y: dy / l, sure: true }; }
+      const bl = Math.hypot(backX, backY);
+      if (backW > 0 && bl > 0.5 * backW) return { x: -backX / bl, y: -backY / bl, sure: false };
+      return null;
+    }
+    function takeBg(t) {
+      const vw = vid.videoWidth, vh = vid.videoHeight;
+      if (!vw || !c0) return;
+      if (!bgCv) bgCv = document.createElement('canvas');
+      if (bgCv.width !== vw || bgCv.height !== vh) { bgCv.width = vw; bgCv.height = vh; }
+      const bx = bgCv.getContext('2d', { willReadFrequently: true });
+      try { bx.drawImage(vid, 0, 0, vw, vh); } catch (e) { bgFor = -1; return; }
+      const R1 = 1.7 * r, R2 = 2.6 * r;
+      const x0 = Math.max(0, Math.floor(c0.x - R2)), y0 = Math.max(0, Math.floor(c0.y - R2)), x1 = Math.min(vw, Math.ceil(c0.x + R2)), y1 = Math.min(vh, Math.ceil(c0.y + R2));
+      let d;
+      try { d = bx.getImageData(x0, y0, x1 - x0, y1 - y0).data; } catch (e) { bgFor = -1; return; }
+      const cr = [], cg = [], cb = [];
+      for (let y = y0; y < y1; y += 2) for (let x = x0; x < x1; x += 2) {
+        const q = Math.hypot(x + 0.5 - c0.x, y + 0.5 - c0.y);
+        if (q >= R1 + 0.2 * r && q <= R2) { const i = ((y - y0) * (x1 - x0) + (x - x0)) * 4; cr.push(d[i]); cg.push(d[i + 1]); cb.push(d[i + 2]); }
+      }
+      if (cr.length < 10) { bgFor = -1; return; }
+      bx.fillStyle = `rgb(${median(cr)},${median(cg)},${median(cb)})`;
+      bx.beginPath(); bx.arc(c0.x, c0.y, R1, 0, 2 * Math.PI); bx.fill();
+      bgFor = restStart; bgAt = t;
+    }
     // While the ball moves, only the area where it can be in the next frame is searched (cheap, and nothing else gets in the way).
     function region(t) {
+      const bg = bgCv && bgFor === restStart ? bgCv : null;
+      if (st === 'rest' && armed && bg) return Object.assign(cropBox(seed.x, seed.y, ROI_R * r), { bg });
       if (st !== 'move') return null;
+      return Object.assign(moveBox(t), { bg });
+    }
+    function moveBox(t) {
       const L = track[track.length - 1], dtm = Math.max(0, t - L.t);
       let ux = L.x - c0.x, uy = L.y - c0.y;
       const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
@@ -1468,13 +1574,18 @@ input[type=number]{width:7em}
       return boxOf(px - half, py - half, px + half, py + half);
     }
     let st = 'wait', restStart = 0, restT = 0, c0 = null, track = [], restPts = [], armed = false, nextCheck = 0;
+    // Tracks thrown away here are kept (last few) so a missed putt can be explained from copied data.
+    const drops = [];
+    const drop = (why, pts) => { drops.push({ why, t: pts.length ? pts[0].t : null, n: pts.length, pts: pts.map(p => [p.t, p.x, p.y]) }); if (drops.length > 6) drops.shift(); return null; };
     function finish() {
       const tr = track; track = []; st = 'wait';
       const pts = tr.slice(1);
-      if (pts.length < 3) return null;
+      if (pts.length < 3) return drop('few', pts);
       const d = pts.map(p => hyp(p, c0));
-      if (d[d.length - 1] < 4 * r) return null;
-      for (let i = 1; i < d.length; i++) if (d[i] < d[i - 1] - 0.3 * r) return null;
+      if (d[d.length - 1] < 4 * r) return drop('short', pts);
+      for (let i = 1; i < d.length; i++) if (d[i] < d[i - 1] - 0.3 * r) return drop('back', pts);
+      const lp = pts[pts.length - 1];
+      if (d[d.length - 1] >= 10 * r) lastDir = { x: (lp.x - c0.x) / d[d.length - 1], y: (lp.y - c0.y) / d[d.length - 1] };
       return { ok: true, c0: { x: c0.x, y: c0.y }, tRest: tr[0].t, pts, tImpact: (tr[0].t + pts[0].t) / 2 };
     }
     function step(t, D) {
@@ -1490,8 +1601,12 @@ input[type=number]{width:7em}
         });
         let q = null;
         if (track.length === 2) {
-          // Speed is still unknown right after impact: take the most ball-like candidate.
-          C.forEach(c => { if (c.sc >= 0.6 * ref.sc && (!q || c.sc > q.sc)) q = c; });
+          // Speed is still unknown right after impact. On the background-subtracted picture only moving things are left,
+          // and the ball is always in front of the putter: take the one farthest ahead. Otherwise the most ball-like one.
+          if (C.length && C[0].diff) {
+            let best = -Infinity;
+            C.forEach(c => { if (c.sc < 0.3 * ref.sc) return; const sp = (c.x - c0.x) * ux + (c.y - c0.y) * uy; if (sp > best) { best = sp; q = c; } });
+          } else C.forEach(c => { if (c.sc >= 0.6 * ref.sc && (!q || c.sc > q.sc)) q = c; });
         } else {
           const vx = (L.x - P2.x) / (L.t - P2.t), vy = (L.y - P2.y) / (L.t - P2.t);
           const px = L.x + vx * dtm, py = L.y + vy * dtm, win = 0.6 * Math.hypot(vx, vy) * dtm + 1.5 * r;
@@ -1511,11 +1626,11 @@ input[type=number]{width:7em}
         return real(t - L.t) > 0.1 ? finish() : null;
       }
       const near = st === 'rest'
-        ? D.filter(q => hyp(q, c0) < 0.6 * r)
+        ? D.filter(q => hyp(q, c0) < 0.6 * r && (!q.diff || q.sc >= 0.55 * ref.sc))
         : D.filter(q => hyp(q, seed) < 1.5 * r);
       if (near.length) {
         const q = near.reduce((a, b) => (b.sc > a.sc ? b : a));
-        if (st === 'wait') { st = 'rest'; restStart = t; restPts = []; armed = false; nextCheck = 0; }
+        if (st === 'wait') { st = 'rest'; restStart = t; restPts = []; armed = false; nextCheck = 0; bgAt = -Infinity; backX = backY = backW = 0; }
         restPts.push(q); if (restPts.length > 6) restPts.shift();
         c0 = { x: restPts.reduce((a, p) => a + p.x, 0) / restPts.length, y: restPts.reduce((a, p) => a + p.y, 0) / restPts.length };
         restT = t;
@@ -1528,15 +1643,29 @@ input[type=number]{width:7em}
           armed = ok;
           if (!ok) nextCheck = t + 0.3 * sc;
         }
+        if (armed && real(t - bgAt) >= 0.4) takeBg(t);
+        if (armed && q.sc >= 0.7 * ref.sc) D.forEach(o => {
+          const dd = hyp(o, c0);
+          if (o.diff && dd > 1.6 * r && dd < 7 * r && o.sc >= 0.2 * ref.sc) { const w = o.sc / dd; backX += (o.x - c0.x) * w / dd; backY += (o.y - c0.y) * w / dd; backW += w; }
+        });
         return null;
       }
       if (st !== 'rest') return null;
       if (!armed) { if (real(t - restT) > 0.15) st = 'wait'; return null; }
       if (real(restT - restStart) < 0.25) { if (real(t - restT) > 0.15) st = 'wait'; return null; }
       const maxStep = mps2px(6) * (t - restT) + r;
-      const C = D.filter(q => hyp(q, c0) <= maxStep && q.sc >= 0.6 * ref.sc);
+      const C = D.filter(q => hyp(q, c0) <= maxStep && q.sc >= (q.diff ? 0.3 : 0.6) * ref.sc);
+      const fw = C.length && C[0].diff ? forward() : null, fx = fw ? fw.x : 0, fy = fw ? fw.y : 0;
       if (C.length) {
-        const q = C.reduce((a, b) => (b.sc > a.sc ? b : a));
+        let q = null;
+        if (fw) {
+          // Ahead of the start along the way the ball must go, and not far to the side of it (a putter head is wide).
+          C.forEach(c => {
+            const dx = c.x - c0.x, dy = c.y - c0.y, sp = dx * fx + dy * fy, lat = Math.abs(dx * fy - dy * fx);
+            if (sp > 0.5 * r && (!fw.sure || lat <= 1.5 * r + 0.35 * sp) && (!q || sp > q.sp)) q = Object.assign({}, c, { sp });
+          });
+          if (!q) { if (real(t - restT) > 0.15) st = 'wait'; return null; }
+        } else q = C.reduce((a, b) => (b.sc > a.sc ? b : a));
         // The most ball-like thing has barely moved yet (high frame rates): wait a frame rather than grab the putter.
         if (hyp(q, c0) < 0.9 * r) return null;
         track = [{ t: restT, x: c0.x, y: c0.y }, { t, x: q.x, y: q.y }];
@@ -1553,6 +1682,8 @@ input[type=number]{width:7em}
       current: () => (st === 'move' ? track.slice() : null),
       rest: () => (st === 'rest' ? c0 : null),
       armed: () => st === 'rest' && armed,
+      dir: () => lastDir,
+      drops: () => drops.slice(),
       state: () => st
     };
   }
@@ -1698,7 +1829,10 @@ input[type=number]{width:7em}
     }
     const d = -2 * q.c[2], se = 2 * Math.sqrt(Math.max(q.sse / Math.max(1, n - 3), SIG_MIN * SIG_MIN) * q.varC2);
     const base = { d, se, sEnd: sAt(q, T), fit: q };
-    if (d - 2 * se >= 1.0 && d <= 9) return Object.assign(base, { kind: 'skid', vLast: vAt(q, T), sLast: sAt(q, T) });
+    // Still sliding at the edge: clearly sliding-hard slowdown, or a fast putt that crossed the picture in a third of a
+    // second (too few frames to be sure) but slowing as hard as a sliding ball does (a track that already rolled for part
+    // of the way slows less on average and stays "unknown").
+    if ((d - 2 * se >= 1.0 || (d >= 2.2 && T <= 0.35)) && d <= 9) return Object.assign(base, { kind: 'skid', vLast: vAt(q, T), sLast: sAt(q, T) });
     if (d + 2 * se <= 0.9 && d >= -0.6) return Object.assign(base, { kind: 'roll', vFirst: vAt(q, 0), sFirst: sAt(q, 0) });
     return Object.assign(base, { kind: 'unknown' });
   }
@@ -1717,7 +1851,7 @@ input[type=number]{width:7em}
     const P = tabs.putt;
     if (!run.ok || !P.seed || !run.pts || run.pts.length < 2) return null;
     const sc = settings.scale, c0 = run.c0, pts = run.pts;
-    let mmPerPx = BALL_MM / (2 * P.seed.r);
+    let mmPerPx = BALL_MM / (2 * (P.seed.rs || P.seed.r));
     if (P.calib) { const cpx = dist(P.calib.a, P.calib.b); if (cpx > 1) mmPerPx = (settings.calMode === 'ball' ? BALL_MM : settings.calLen * 10) / cpx; }
     const last = pts[pts.length - 1];
     let ux = last.x - c0.x, uy = last.y - c0.y;
@@ -1751,8 +1885,13 @@ input[type=number]{width:7em}
     if (!(pair > 0)) return null;
     const ph = rollPhases(S);
     // When the switch to rolling is seen, the whole sliding stretch gives the launch speed (not just the first 0.14 s,
-    // which may already include some rolling).
-    if (ph.kind === 'knot') { const lf = launchFrom(ph.fit); if (lf.v0 >= 0.9 * pair && lf.v0 <= 1.6 * pair) { v0 = lf.v0; tauI = lf.tauI; } }
+    // which may already include some rolling). When the ball seems to slide to the edge of the picture, the whole track
+    // is used only if it agrees with the first 0.14 s: if the switch to rolling was missed, a fit through the whole track
+    // would come out too slow.
+    if (ph.kind === 'knot' || ph.kind === 'skid') {
+      const lf = launchFrom(ph.fit);
+      if (lf.v0 >= 0.9 * pair && lf.v0 <= 1.6 * pair && (ph.kind === 'knot' || Math.abs(lf.v0 / v0 - 1) <= 0.04)) { v0 = lf.v0; tauI = lf.tauI; }
+    }
     if (!(v0 >= 0.9 * pair && v0 <= 1.6 * pair)) v0 = pair;
     tauI = clamp(Number.isFinite(tauI) ? tauI : 0, 0, S[0].tau);
     // Distance: the ball slides first, then rolls; only the rolling part depends on green speed.
@@ -1986,10 +2125,10 @@ input[type=number]{width:7em}
       if (restSample != null) { try { await seekTo(restSample); s2 = seedBall(restSampleC0 || seed); } catch (e) { s2 = null; } }
       if (s2 && !s2.err && s2.round >= 0.7 && Math.abs(s2.r - seed.r) <= 0.25 * seed.r) {
         if (Math.hypot(s2.x - seed.x, s2.y - seed.y) > 0.5 * seed.r || Math.abs(s2.r - seed.r) > 0.08 * seed.r) { seed = s2; camMoved = true; }
-        else seed = { x: seed.x, y: seed.y, r: seed.r, t: s2.t, ref: s2.ref };
+        else seed = { x: seed.x, y: seed.y, r: seed.r, rs: seed.rs || s2.rs, t: s2.t, ref: s2.ref };
       } else if (restStats.length >= 5) {
         const moved = !!restSampleC0 && Math.hypot(restSampleC0.x - seed.x, restSampleC0.y - seed.y) > 0.5 * seed.r;
-        seed = { x: moved ? restSampleC0.x : seed.x, y: moved ? restSampleC0.y : seed.y, r: seed.r, t: 0, ref: { sc: median(restStats.map(q => q.sc)), mi: median(restStats.map(q => q.mi)) } };
+        seed = { x: moved ? restSampleC0.x : seed.x, y: moved ? restSampleC0.y : seed.y, r: seed.r, rs: seed.rs, t: 0, ref: { sc: median(restStats.map(q => q.sc)), mi: median(restStats.map(q => q.mi)) } };
         camMoved = moved;
       } else seed = Object.assign({}, seed, { ref: seed.ref || null });
       P.seed = seed;
@@ -1998,14 +2137,14 @@ input[type=number]{width:7em}
 
     const moments = [];
     cands.forEach(t => { if (!moments.length || real(t - moments[moments.length - 1]) > 0.6) moments.push(t); });
-    let doneUntil = -Infinity;
+    let doneUntil = -Infinity, lastDir = null;
     for (let i = 0; i < moments.length && !cancelled; i++) {
       const tc = moments[i];
       if (tc < doneUntil) continue;
       let found = null, w = 'end', rateF = 0.5;
       for (let attempt = 0; attempt < 3; attempt++) {
         setProgress(0.7 + 0.3 * (i / moments.length), attempt ? `${i + 1}번째 퍼팅을 더 천천히 다시 재는 중…` : `${moments.length}개 중 ${i + 1}번째 퍼팅을 자세히 재는 중…`);
-        const tracker = makeTracker(seed);
+        const tracker = makeTracker(seed, { dir: lastDir });
         let lastF = null, minGap = Infinity, dropped = false;
         const fineGaps = [];
         found = null;
@@ -2031,7 +2170,11 @@ input[type=number]{width:7em}
         if ((w !== 'end' && w !== 'stop') || !dropped) break;
         rateF /= 2;
       }
-      if (found) { P.runs.push(found); doneUntil = found.pts[found.pts.length - 1].t; updatePuttAuto(); updateTicks(); }
+      if (found) {
+        P.runs.push(found); doneUntil = found.pts[found.pts.length - 1].t; updatePuttAuto(); updateTicks();
+        const lp = found.pts[found.pts.length - 1], dl = Math.hypot(lp.x - found.c0.x, lp.y - found.c0.y);
+        if (dl >= 10 * seed.r) lastDir = { x: (lp.x - found.c0.x) / dl, y: (lp.y - found.c0.y) / dl };
+      }
       if (w === 'cancel') { cancelled = true; break; }
       if (w !== 'end' && w !== 'stop') { problem = w; break; }
     }
