@@ -15,7 +15,7 @@
 /* Layout: one column like a range-side launch monitor — live viewfinder, status, last-putt readout, session log, settings */
 :root{
   --bg:#ECF0EB; --panel:#F7F9F6; --ink:#15241B; --muted:#58685D; --line:#CCD6CE;
-  --accent:#1D6A44; --accent-ink:#FFFFFF; --accent-soft:#DCEBE1; --warn:#9B4A12; --good:#1D6A44;
+  --accent:#1D6A44; --accent-ink:#FFFFFF; --accent-soft:#DCEBE1; --warn:#9B4A12; --good:#1D6A44; --slide:#C47A1E;
   --stage:#0D1310; --stage-ink:#DDE6E0; --stage-dim:#7E9086; --stage-line:#26332C; --cam:#FFD23F;
   --font-ui:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
   --font-num:"Barlow Condensed","Arial Narrow","Roboto Condensed",system-ui,sans-serif;
@@ -25,13 +25,13 @@
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#0E1411; --panel:#151F1A; --ink:#E1E9E3; --muted:#93A399; --line:#28362E;
-    --accent:#4CC38A; --accent-ink:#05140C; --accent-soft:#1A3326; --warn:#F0A35E; --good:#4CC38A;
+    --accent:#4CC38A; --accent-ink:#05140C; --accent-soft:#1A3326; --warn:#F0A35E; --good:#4CC38A; --slide:#E3A04B;
     --stage:#060A08; --stage-line:#1E2A23; color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
   --bg:#0E1411; --panel:#151F1A; --ink:#E1E9E3; --muted:#93A399; --line:#28362E;
-  --accent:#4CC38A; --accent-ink:#05140C; --accent-soft:#1A3326; --warn:#F0A35E; --good:#4CC38A;
+  --accent:#4CC38A; --accent-ink:#05140C; --accent-soft:#1A3326; --warn:#F0A35E; --good:#4CC38A; --slide:#E3A04B;
   --stage:#060A08; --stage-line:#1E2A23; color-scheme:dark;
 }
 *{box-sizing:border-box}
@@ -70,7 +70,9 @@ h1{margin:0;font-size:1.32rem;font-weight:600;letter-spacing:-.01em;text-wrap:ba
 .pill[data-s="wait"] i{background:#DDE6E0}
 .pill[data-s="warn"] i{background:#F0A35E}
 .fpsbadge{position:absolute;right:10px;top:10px;z-index:2;font-family:var(--font-num);font-weight:600;font-size:.9rem;padding:4px 10px;border-radius:999px;background:rgba(6,10,8,.72);color:#DDE6E0;pointer-events:none}
-.stage.empty .fpsbadge{display:none}
+.stage.empty .fpsbadge,.stage.empty .tiltbadge{display:none}
+.tiltbadge{position:absolute;left:10px;top:46px;z-index:2;font-weight:600;font-size:.82rem;padding:4px 10px;border-radius:999px;background:rgba(6,10,8,.72);color:#DDE6E0;pointer-events:none}
+.tiltbadge.warn{color:#F0A35E}
 .hint{margin:0;font-size:.9rem;color:var(--muted);min-height:1.4em;text-align:center;max-width:62ch}
 .hint.warn{color:var(--warn);font-weight:500}
 
@@ -108,9 +110,20 @@ h1{margin:0;font-size:1.32rem;font-weight:600;letter-spacing:-.01em;text-wrap:ba
 .tile.long .v span{color:var(--warn)}
 .tile.hit .v span{color:var(--good)}
 .readout.example .tile .v span{color:var(--muted)}
+/* slide → roll: share of the seen path the ball slid (amber) before rolling (green) */
+.tile.wide{grid-column:1/-1;grid-template-columns:auto minmax(0,1fr);column-gap:16px;align-items:center}
+.tile.wide>.k{grid-column:1/-1}
+.tile .kk{font-weight:400}
+.phase{display:grid;gap:4px;min-width:0}
+.pbar{position:relative;height:10px;border-radius:5px;background:var(--accent);overflow:hidden}
+.pbar i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--slide);box-shadow:2px 0 0 var(--bg)}
+.pbar.cont i{box-shadow:none}
+.lg{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:.74rem;color:var(--muted)}
+.lg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:0}
+.readout.example .pbar{opacity:.55}
 
 .runs{display:grid;gap:2px}
-.runs-h,.run{display:grid;grid-template-columns:1.6em minmax(0,1fr) minmax(0,1.2fr) minmax(0,1fr) minmax(0,1.1fr) 3.4em;gap:6px;align-items:center;padding:6px 8px}
+.runs-h,.run{display:grid;grid-template-columns:1.6em minmax(0,1fr) minmax(0,1.2fr) minmax(0,1fr) minmax(0,.9fr) minmax(0,1.1fr) 3.4em;gap:6px;align-items:center;padding:6px 8px}
 .runs-h{font-size:.74rem;color:var(--muted);font-weight:600;padding-block:2px}
 .run{border-radius:8px;font-family:var(--font-num);font-size:1.05rem;font-variant-numeric:tabular-nums}
 #runsBody .run:nth-child(odd){background:var(--bg)}
@@ -152,13 +165,14 @@ input[type=number]{width:7em}
       <canvas id="overlay" aria-label="카메라 화면 위에 점을 찍는 영역"></canvas>
       <div class="pill" id="pill" data-s="off"><i></i><span id="pillText">카메라 꺼짐</span></div>
       <div class="fpsbadge" id="fpsBadge"></div>
+      <div class="tiltbadge" id="tiltBadge" hidden></div>
       <div class="guide">
         <div>
           <h2>삼각대에 폰을 고정하고 시작하세요</h2>
           <p>퍼팅할 때마다 볼 스피드와 거리를 소리로 알려줘요. 영상은 폰 안에서만 처리돼요.</p>
         </div>
         <ol>
-          <li>공 위에서 내려다보게 폰을 고정해요. 공 앞 30cm까지 화면에 들어오게요.</li>
+          <li>공 위에서 내려다보게 폰을 고정해요. 폰 긴 쪽을 퍼팅 방향으로 두고, 공 앞 1m까지 화면에 들어오게요. 화면이 매트와 평행해야 정확해요.</li>
           <li>카메라를 켜고 출발 자리에 놓인 공을 한 번 눌러요.</li>
           <li>목표선을 긋고 측정 시작을 누르면 끝이에요. 다음부터는 저장된 설정을 그대로 써요.</li>
         </ol>
@@ -190,6 +204,15 @@ input[type=number]{width:7em}
       <div class="tile"><span class="k">예상 굴림 거리</span><div class="v"><span id="lRoll">2.1</span><small>m</small></div><span class="s" id="lRollS">스팀프 10 기준</span></div>
       <div class="tile"><span class="k" id="lAngK">출발 방향</span><div class="v"><span id="lAng">0.7</span><small>°</small></div><span class="s" id="lAngS">목표선 왼쪽</span></div>
       <div class="tile" id="lDiffTile"><span class="k">목표 대비</span><div class="v"><span id="lDiff">−0.9</span><small id="lDiffU">m</small></div><span class="s" id="lDiffS">목표 3.0m</span></div>
+      <div class="tile wide">
+        <span class="k">구름 효율 <span class="kk">· 구르기 시작할 때 남은 속도, 보통 71%</span></span>
+        <div class="v"><span id="lEff">72</span><small id="lEffU">%</small></div>
+        <div class="phase">
+          <div class="pbar" id="lBar"><i style="width:40%"></i></div>
+          <span class="lg"><span><i style="background:var(--slide)"></i>미끄러짐</span><span><i style="background:var(--accent)"></i>구름</span><span id="lSeen">화면에서 95cm 따라감</span></span>
+          <span class="s" id="lEffS">38cm 미끄러지고 1.46 m/s로 구르기 시작</span>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -197,7 +220,7 @@ input[type=number]{width:7em}
     <div class="rhead"><h2>이번 연습 기록</h2><div class="row"><button type="button" class="ghost" id="copyData">측정 데이터 복사</button><button type="button" class="ghost" id="clearRuns">기록 지우기</button></div></div>
     <div class="sum" id="sum"></div>
     <div class="runs">
-      <div class="runs-h"><span>#</span><span>m/s</span><span id="runsAngH">방향</span><span>거리</span><span>목표 대비</span><span></span></div>
+      <div class="runs-h"><span>#</span><span>m/s</span><span id="runsAngH">방향</span><span>거리</span><span>구름</span><span>목표 대비</span><span></span></div>
       <div id="runsBody"></div>
     </div>
   </section>
@@ -212,6 +235,7 @@ input[type=number]{width:7em}
           <label><input type="checkbox" id="sayDist">예상 거리</label>
           <label><input type="checkbox" id="sayDir">방향</label>
           <label><input type="checkbox" id="sayDiff">목표 대비</label>
+          <label><input type="checkbox" id="sayRoll">구름 효율</label>
           <label><input type="checkbox" id="beepOn">준비되면 띵 소리</label>
         </div>
         <div class="row"><button type="button" class="ghost" id="testVoice">소리 들어보기</button></div>
@@ -223,8 +247,8 @@ input[type=number]{width:7em}
       </div>
       <div class="field">
         <label for="stimp">그린 빠르기 (스팀프, 피트)</label>
-        <input type="number" id="stimp" min="3" max="16" step="0.5" inputmode="decimal">
-        <p class="help">예상 거리를 이 빠르기의 그린 기준으로 계산해요. 한국식 그린 스피드 2.8m는 9.2예요. 매트 실제 거리에 맞추려면 매트 스팀프를 넣으세요.</p>
+        <input type="number" id="stimp" min="3" max="30" step="0.5" inputmode="decimal">
+        <p class="help">예상 거리를 이 빠르기의 그린 기준으로 계산해요. 한국식 그린 스피드 2.8m는 9.2예요. 매트 실제 거리에 맞추려면 매트 스팀프를 넣으세요. 빠른 매트는 20을 넘기도 해요.</p>
       </div>
       <div class="field">
         <label for="fpsSel">카메라 프레임</label>
@@ -244,7 +268,9 @@ input[type=number]{width:7em}
   </details>
 
   <ul class="notes">
-    <li>공을 출발 자리에 놓고 멈추면 띵 소리가 나요. 그다음 퍼팅하면 공이 30cm쯤 굴러간 뒤 결과를 읽어줘요.</li>
+    <li>공을 출발 자리에 놓고 멈추면 띵 소리가 나요. 그다음 퍼팅하면 공이 화면 끝까지 굴러간 뒤 결과를 읽어줘요.</li>
+    <li>공은 처음에 미끄러지다가 구르기 시작해요. 화면에서 그 지점을 찾아 미끄러진 거리와 구르기 시작한 속도를 재고, 예상 거리는 그 속도로 계산해요. 구름 효율은 그때 속도가 출발 속도의 몇 %인지예요. 스핀 없이 맞은 공은 71%이고, 높을수록 덜 미끄러진 거예요.</li>
+    <li>폰이 기울어 있으면 화면 먼 쪽의 거리가 틀어져서 구르는 속도가 달라져요. 화면 왼쪽 위에 폰 기울기가 나오니 1° 안쪽으로 맞추세요.</li>
     <li>볼 스피드는 공 지름(42.67mm)과 카메라 프레임 시간으로 재요. 매트 빠르기나 경사와는 상관없어요.</li>
     <li>출발 자리와 목표선은 이 폰에 저장돼요. 삼각대를 옮겼다면 출발 자리를 다시 눌러주세요.</li>
     <li>측정하는 동안 화면이 꺼지지 않게 해요. 배터리가 빨리 닳으니 충전기를 연결해두면 좋아요.</li>
@@ -265,8 +291,8 @@ input[type=number]{width:7em}
   const hasRVFC = typeof HTMLVideoElement !== 'undefined' && 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
 
   // Live camera: no slow motion, ball-diameter calibration only.
-  const settings = { scale: 1, stimp: 10, calMode: 'ball', calLen: 30, fps: '60', target: 0, deviceId: '', beep: true, say: { speed: true, dist: true, dir: true, diff: true } };
-  try { const s = JSON.parse(localStorage.getItem('live.settings') || 'null'); if (s && typeof s === 'object') { Object.assign(settings, s, { scale: 1, calMode: 'ball' }); settings.say = Object.assign({ speed: true, dist: true, dir: true, diff: true }, s.say || {}); } } catch (e) {}
+  const settings = { scale: 1, stimp: 10, calMode: 'ball', calLen: 30, fps: '60', target: 0, deviceId: '', beep: true, say: { speed: true, dist: true, dir: true, diff: true, roll: true } };
+  try { const s = JSON.parse(localStorage.getItem('live.settings') || 'null'); if (s && typeof s === 'object') { Object.assign(settings, s, { scale: 1, calMode: 'ball' }); settings.say = Object.assign({ speed: true, dist: true, dir: true, diff: true, roll: true }, s.say || {}); } } catch (e) {}
   const saveSettings = () => { try { localStorage.setItem('live.settings', JSON.stringify(settings)); } catch (e) {} };
 
   // Same shape as the video-analysis page so the shared measuring code runs unchanged.
@@ -379,8 +405,8 @@ input[type=number]{width:7em}
   };
   const EX_RUNS = [[2.21, 0.6, 2.4], [2.14, -0.3, 2.2], [2.26, 1.1, 2.5], [2.08, 0.2, 2.1], [2.18, -0.4, 2.3]];
   const RS = 6;            // ball radius in detector pixels
-  const ROI_R = 20;        // search area around the start spot, in ball radii
-  const STOP_R = 16;       // stop following a putt after this many ball radii
+  const ROI_R = 20;        // search area around the start spot while the ball rests, in ball radii
+  const MAX_R = 160;       // a putt is followed to the edge of the picture or until it stops; this is only a backstop
 
   const ac = document.createElement('canvas');
   const actx = ac.getContext('2d', { willReadFrequently: true });
@@ -403,21 +429,23 @@ input[type=number]{width:7em}
     }
     return { m, w: cw, h: ch, x0, y0, kx: cw / w, ky: ch / h };
   }
-  function cropBox(cx, cy, half) {
+  function boxOf(xa, ya, xb, yb) {
     const vw = vid.videoWidth, vh = vid.videoHeight;
-    const x0 = clamp(Math.floor(cx - half), 0, vw - 1), y0 = clamp(Math.floor(cy - half), 0, vh - 1);
-    const x1 = clamp(Math.ceil(cx + half), x0 + 1, vw), y1 = clamp(Math.ceil(cy + half), y0 + 1, vh);
+    const x0 = clamp(Math.floor(xa), 0, vw - 1), y0 = clamp(Math.floor(ya), 0, vh - 1);
+    const x1 = clamp(Math.ceil(xb), x0 + 1, vw), y1 = clamp(Math.ceil(yb), y0 + 1, vh);
     return { x0, y0, w: x1 - x0, h: y1 - y0 };
   }
+  const cropBox = (cx, cy, half) => boxOf(cx - half, cy - half, cx + half, cy + half);
   const sampleAt = (g, x, y) => {
     const xi = Math.round(x), yi = Math.round(y);
     return (xi < 0 || yi < 0 || xi >= g.w || yi >= g.h) ? -1 : g.m[yi * g.w + xi];
   };
 
   // Blob detector: bright square core minus its surroundings. Thin lines, text and ring markings score low; a ball scores high.
-  function detectBalls(seed, ref) {
+  // Looks around the start spot, or inside `area` (the tracker's window around a moving ball).
+  function detectBalls(seed, ref, area) {
     if (!vid.videoWidth) return null;
-    const b0 = cropBox(seed.x, seed.y, ROI_R * seed.r);
+    const b0 = area || cropBox(seed.x, seed.y, ROI_R * seed.r);
     const g = grabK(b0.x0, b0.y0, b0.w, b0.h, RS / seed.r);
     if (!g) return null;
     const w = g.w, h = g.h, A = 4, B = 9, W1 = w + 1;
@@ -459,6 +487,35 @@ input[type=number]{width:7em}
       if (out.length >= 16) break;
     }
     return out.map(o => ({ x: g.x0 + (o.cx + 0.5) / g.kx, y: g.y0 + (o.cy + 0.5) / g.ky, sc: o.sc, mi: o.mi }));
+  }
+
+  // Ellipse through the edge rays (from opposite-ray diameters, so a slightly off-center origin doesn't matter).
+  // 1/r² = A + B·cos2ψ + C·sin2ψ; a = short half-axis, b = long half-axis, ang = direction of the long axis.
+  function ellipseOf(rad, NA) {
+    const half = NA / 2, D = [];
+    for (let k = 0; k < half; k++) if (Number.isFinite(rad[k]) && Number.isFinite(rad[k + half])) D.push({ psi: k * 2 * Math.PI / NA, d: rad[k] + rad[k + half] });
+    if (D.length < 6) return null;
+    const md = median(D.map(q => q.d)), use = D.filter(q => Math.abs(q.d - md) <= 0.22 * md);
+    if (use.length < 6) return null;
+    const M = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], v = [0, 0, 0];
+    use.forEach(q => { const f = [1, Math.cos(2 * q.psi), Math.sin(2 * q.psi)], y = 4 / (q.d * q.d); for (let i = 0; i < 3; i++) { v[i] += f[i] * y; for (let j = 0; j < 3; j++) M[i][j] += f[i] * f[j]; } });
+    const c = solveLin(M, v);
+    if (!c) return null;
+    const K = Math.hypot(c[1], c[2]);
+    if (!(c[0] - K > 0)) return null;
+    return { a: 1 / Math.sqrt(c[0] + K), b: 1 / Math.sqrt(c[0] - K), ang: (0.5 * Math.atan2(c[2], c[1]) + Math.PI / 2) * 180 / Math.PI, n: use.length };
+  }
+  // Small dense least-squares solver (Gauss-Jordan with partial pivoting).
+  function solveLin(M, v) {
+    const n = v.length, A = M.map((r, i) => r.concat([v[i]]));
+    for (let c = 0; c < n; c++) {
+      let p = c;
+      for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+      if (!(Math.abs(A[p][c]) > 1e-15)) return null;
+      const tmp = A[c]; A[c] = A[p]; A[p] = tmp;
+      for (let r = 0; r < n; r++) if (r !== c) { const f = A[r][c] / A[c][c]; for (let k = c; k <= n; k++) A[r][k] -= f * A[c][k]; }
+    }
+    return A.map((r, i) => r[n] / r[i]);
   }
 
   // Find the ball under a tap: center and radius from 24 rays, then its look in the blob detector as a reference.
@@ -548,7 +605,8 @@ input[type=number]{width:7em}
       if (rv < 3) return { err: ERR.small };
       // round: share of edge rays within 10% of the radius. A ball scores about 0.9; a putter head or block about 0.4.
       const round = lastRad.filter(d => Number.isFinite(d) && Math.abs(d - r) <= 0.1 * r).length / NA;
-      const seed = { x: g.x0 + (cx + 0.5) / g.kx, y: g.y0 + (cy + 0.5) / g.ky, r: rv, t: vid.currentTime, round };
+      const ell = ellipseOf(lastRad, NA);
+      const seed = { x: g.x0 + (cx + 0.5) / g.kx, y: g.y0 + (cy + 0.5) / g.ky, r: rv, t: vid.currentTime, round, ell: ell && { a: ell.a / g.kx, b: ell.b / g.kx, ang: ell.ang } };
       const D = detectBalls(seed, null) || [];
       const q = D.filter(d => Math.hypot(d.x - seed.x, d.y - seed.y) < 1.5 * rv).sort((a, b) => b.sc - a.sc)[0];
       if (!q) return { err: ERR.contrast };
@@ -558,18 +616,33 @@ input[type=number]{width:7em}
     return { err: ERR.big };
   }
 
-  // Watches the start spot frame by frame: ball at rest -> ball leaves -> follow it ~34 cm -> wait for the next ball.
+  // Watches the start spot frame by frame: ball at rest -> ball leaves -> follow it to the edge of the picture -> wait for the next ball.
   function makeTracker(seed) {
     const r = seed.r, ref = seed.ref, sc = settings.scale;
     const mmPerPx = BALL_MM / (2 * r);
     const mps2px = v => v * 1000 / mmPerPx / sc;
     const real = dt => dt / sc;
     const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-    const roi = cropBox(seed.x, seed.y, ROI_R * r);
+    // A ball cut off by the picture edge would be measured off-center, so stop just before it reaches the edge.
     const nearEdge = q => {
-      const m = 2.2 * r;
-      return q.x - roi.x0 < m || q.y - roi.y0 < m || roi.x0 + roi.w - q.x < m || roi.y0 + roi.h - q.y < m;
+      const m = 2.2 * r, vw = vid.videoWidth, vh = vid.videoHeight;
+      return q.x < m || q.y < m || vw - q.x < m || vh - q.y < m;
     };
+    // While the ball moves, only the area where it can be in the next frame is searched (cheap, and nothing else gets in the way).
+    function region(t) {
+      if (st !== 'move') return null;
+      const L = track[track.length - 1], dtm = Math.max(0, t - L.t);
+      let ux = L.x - c0.x, uy = L.y - c0.y;
+      const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+      if (track.length === 2) {
+        const ahead = mps2px(6) * dtm + r, pad = 3 * r + 0.08 * (ul + ahead);
+        const ax = L.x - 0.3 * r * ux, ay = L.y - 0.3 * r * uy, bx = L.x + ahead * ux, by = L.y + ahead * uy;
+        return boxOf(Math.min(ax, bx) - pad, Math.min(ay, by) - pad, Math.max(ax, bx) + pad, Math.max(ay, by) + pad);
+      }
+      const P2 = track[track.length - 2], vx = (L.x - P2.x) / (L.t - P2.t), vy = (L.y - P2.y) / (L.t - P2.t);
+      const px = L.x + vx * dtm, py = L.y + vy * dtm, half = 0.6 * Math.hypot(vx, vy) * dtm + 3.5 * r;
+      return boxOf(px - half, py - half, px + half, py + half);
+    }
     let st = 'wait', restStart = 0, restT = 0, c0 = null, track = [], restPts = [], armed = false, nextCheck = 0;
     function finish() {
       const tr = track; track = []; st = 'wait';
@@ -608,7 +681,7 @@ input[type=number]{width:7em}
           let back = null;
           for (let k = track.length - 2; k >= 1; k--) if (real(t - track[k].t) >= 0.1) { back = track[k]; break; }
           const stalled = !!back && hyp(q, back) < 0.5 * r;
-          if (hyp(q, c0) >= STOP_R * r || stalled) return finish();
+          if (hyp(q, c0) >= MAX_R * r || stalled) return finish();
           return null;
         }
         return real(t - L.t) > 0.1 ? finish() : null;
@@ -651,6 +724,7 @@ input[type=number]{width:7em}
     }
     return {
       step,
+      region,
       flush: () => (st === 'move' ? finish() : null),
       current: () => (st === 'move' ? track.slice() : null),
       rest: () => (st === 'rest' ? c0 : null),
@@ -693,6 +767,61 @@ input[type=number]{width:7em}
     return { c0, c1, c2 };
   }
 
+  // s = c0 + c1·x + c2·x² (+ c3·max(0, x − knot)²), x = tau − x0. With a knot, position and speed stay continuous
+  // and only the rate of slowing changes there. Also returns how uncertain c2 is (varC2 × noise²).
+  function polyFit(S, x0, knot) {
+    const m = knot == null ? 3 : 4, M = [], v = new Array(m).fill(0);
+    for (let i = 0; i < m; i++) M.push(new Array(m).fill(0));
+    const feats = p => { const x = p.tau - x0, f = [1, x, x * x]; if (knot != null) { const d = Math.max(0, x - knot); f.push(d * d); } return f; };
+    S.forEach(p => { const f = feats(p); for (let i = 0; i < m; i++) { v[i] += f[i] * p.s; for (let j = 0; j < m; j++) M[i][j] += f[i] * f[j]; } });
+    const c = solveLin(M, v);
+    if (!c) return null;
+    let sse = 0;
+    S.forEach(p => { const f = feats(p); let y = 0; for (let i = 0; i < m; i++) y += c[i] * f[i]; sse += (p.s - y) * (p.s - y); });
+    const e2 = solveLin(M, m === 3 ? [0, 0, 1] : [0, 0, 1, 0]);
+    return { c, sse, x0, knot, varC2: e2 ? e2[2] : Infinity };
+  }
+
+  // Where the ball stops sliding and starts rolling. Sliding, friction slows it hard (about 2–3 m/s²); rolling, it slows
+  // about ten times more gently. Compare one steady slowdown with one that eases off at some point (the "knot"), and keep
+  // the knot only when it explains the track clearly better. Positions are in metres, times in seconds.
+  const SIG_MIN = 0.0004;   // tracking noise is never assumed smaller than 0.4 mm
+  function rollPhases(S) {
+    const n = S.length;
+    if (n < 5) return { kind: 'short' };
+    const x0 = S[0].tau, q = polyFit(S, x0, null);
+    if (!q) return { kind: 'short' };
+    const T = S[n - 1].tau - x0, sAt = (f, x) => f.c[0] + f.c[1] * x + f.c[2] * x * x, vAt = (f, x) => f.c[1] + 2 * f.c[2] * x;
+    let best = null;
+    if (n >= 7) {
+      // At least three points on each side of the knot.
+      const lo = S[2].tau - x0, hi = S[n - 4].tau - x0;
+      for (let i = 0; i <= 80; i++) { const f = polyFit(S, x0, lo + (hi - lo) * i / 80); if (f && (!best || f.sse < best.sse)) best = f; }
+    }
+    if (best) {
+      const sig2 = Math.max(best.sse / (n - 5), SIG_MIN * SIG_MIN), k = best.knot;
+      const d1 = -2 * best.c[2], d2 = -2 * (best.c[2] + best.c[3]), F = (q.sse - best.sse) / sig2;
+      const vT = vAt(best, k), sT = sAt(best, k);
+      const xe = T - k, sEnd = sT + vT * xe - 0.5 * d2 * xe * xe;
+      if (d1 >= 0.8 && d1 <= 9 && d2 >= -0.6 && d2 <= 1.5 && d1 - d2 >= 0.8 && F >= 16 && vT > 0)
+        return { kind: 'knot', sT, vT, d1, d2, F, sEnd, fit: best };
+    }
+    const d = -2 * q.c[2], se = 2 * Math.sqrt(Math.max(q.sse / Math.max(1, n - 3), SIG_MIN * SIG_MIN) * q.varC2);
+    const base = { d, se, sEnd: sAt(q, T), fit: q };
+    if (d - 2 * se >= 1.0 && d <= 9) return Object.assign(base, { kind: 'skid', vLast: vAt(q, T), sLast: sAt(q, T) });
+    if (d + 2 * se <= 0.9 && d >= -0.6) return Object.assign(base, { kind: 'roll', vFirst: vAt(q, 0), sFirst: sAt(q, 0) });
+    return Object.assign(base, { kind: 'unknown' });
+  }
+  // Launch speed and impact time from the sliding part of a fit: back to where the ball sat (s = 0).
+  function launchFrom(f) {
+    const [a0, a1, a2] = f.c, x0 = f.x0, lo = -x0 - 0.02;
+    let x = NaN;
+    const disc = a1 * a1 - 4 * a2 * a0;
+    if (a2 !== 0 && disc >= 0) { const sq = Math.sqrt(disc); [(-a1 + sq) / (2 * a2), (-a1 - sq) / (2 * a2)].forEach(r => { if (r >= lo && r <= 0 && !(r <= x)) x = r; }); }
+    if (!Number.isFinite(x)) x = -a0 / a1;
+    return { v0: a1 + 2 * a2 * x, tauI: x + x0 };
+  }
+
   // Speed, roll and angle for one tracked putt with the current settings (stimp, target line and calibration can change afterwards).
   function runMetrics(run) {
     const P = tabs.putt;
@@ -730,16 +859,40 @@ input[type=number]{width:7em}
       v0 = lf.b; tauI = Number.isFinite(lf.b) && lf.b > 0 ? -lf.c / lf.b : S[0].tau / 2;
     }
     if (!(pair > 0)) return null;
+    const ph = rollPhases(S);
+    // When the switch to rolling is seen, the whole sliding stretch gives the launch speed (not just the first 0.14 s,
+    // which may already include some rolling).
+    if (ph.kind === 'knot') { const lf = launchFrom(ph.fit); if (lf.v0 >= 0.9 * pair && lf.v0 <= 1.6 * pair) { v0 = lf.v0; tauI = lf.tauI; } }
     if (!(v0 >= 0.9 * pair && v0 <= 1.6 * pair)) v0 = pair;
     tauI = clamp(Number.isFinite(tauI) ? tauI : 0, 0, S[0].tau);
-    let tail = S.filter(p => p.tau >= S[S.length - 1].tau - 0.07 - 1e-6);
-    if (tail.length < 3) tail = S.slice(-3);
-    const vEnd = tail.length >= 2 ? linFit(tail).b : pair;
-    const a = STIMP_V * STIMP_V / (2 * settings.stimp * FT);
-    const sLast = S[S.length - 1].s;
-    const roll = sLast + (vEnd > 0 ? vEnd * vEnd / (2 * a) : 0);
+    // Distance: the ball slides first, then rolls; only the rolling part depends on green speed.
+    //  knot  – the switch is in view: slid sT, started rolling at vT (both measured).
+    //  skid  – still sliding at the edge of the picture: keeps sliding at the measured rate until 5/7 of the launch
+    //          speed (a ball without spin), or rolls from the last seen speed if it is already slower.
+    //  roll  – rolling from the first frames: the slide was shorter than the first few centimetres.
+    //  else  – too few points to tell: no-spin ball (rolls at 5/7 of launch speed) sliding at 2.7 m/s².
+    const a = STIMP_V * STIMP_V / (2 * settings.stimp * FT), SKID_DECEL = 2.7;
+    let skid, vRoll, eff = null, effMax = null;
+    if (ph.kind === 'knot') { skid = ph.sT; vRoll = Math.min(ph.vT, v0); eff = vRoll / v0; }
+    else if (ph.kind === 'skid') {
+      vRoll = Math.min(5 / 7 * v0, ph.vLast);
+      skid = ph.sLast + Math.max(0, ph.vLast * ph.vLast - vRoll * vRoll) / (2 * ph.d);
+      effMax = Math.min(1, ph.vLast / v0);
+    } else if (ph.kind === 'roll') {
+      skid = Math.max(0, ph.sFirst); vRoll = Math.min(ph.vFirst, v0);
+      // "Rolled at once" only says something when a ball without spin would have slid clearly farther than the
+      // first tracked point. Slow putts slide only a few centimetres anyway, before the camera can see it.
+      const noSpinSlide = v0 * v0 * (24 / 49) / (2 * SKID_DECEL);
+      if (noSpinSlide > 2 * Math.max(ph.sFirst, 0.03)) eff = vRoll / v0;
+    }
+    else { vRoll = 5 / 7 * v0; skid = (v0 * v0 - vRoll * vRoll) / (2 * SKID_DECEL); }
+    const roll = skid + vRoll * vRoll / (2 * a);
     const ag = angleFor({ x: ux, y: uy }, P);
-    return { v0, roll, vEnd, ang: ag ? ag.ang : null, defaultGround: ag ? !!ag.defaultGround : false, tImpact: run.tRest + tauI * sc };
+    return {
+      v0, roll, vEnd: vRoll, vRoll, skid, eff, effMax, phase: ph.kind, seen: ph.sEnd != null ? ph.sEnd : S[S.length - 1].s,
+      d1: ph.d1 != null ? ph.d1 : ph.d, d2: ph.d2 != null ? ph.d2 : null,
+      ang: ag ? ag.ang : null, defaultGround: ag ? !!ag.defaultGround : false, tImpact: run.tRest + tauI * sc
+    };
   }
   function summary(rows) {
     const ms = rows.filter(r => r.ok && !r.ex).map(r => r.m), n = ms.length;
@@ -748,13 +901,18 @@ input[type=number]{width:7em}
     const sd = (a, mu) => a.length > 1 ? Math.sqrt(a.reduce((s, x) => s + (x - mu) * (x - mu), 0) / (a.length - 1)) : 0;
     const vs = ms.map(m => m.v0), v = mean(vs);
     const as = ms.filter(m => m.ang != null).map(m => m.ang), am = as.length ? mean(as) : null;
-    return { n, v, cv: v > 0 ? sd(vs, v) / v * 100 : 0, roll: mean(ms.map(m => m.roll)), ang: am, angSd: as.length > 1 ? sd(as, am) : null, defaultGround: ms.some(m => m.defaultGround) };
+    const es = ms.filter(m => m.eff != null), ks = ms.filter(m => m.phase === 'knot');
+    return {
+      n, v, cv: v > 0 ? sd(vs, v) / v * 100 : 0, roll: mean(ms.map(m => m.roll)), ang: am, angSd: as.length > 1 ? sd(as, am) : null, defaultGround: ms.some(m => m.defaultGround),
+      eff: es.length ? mean(es.map(m => m.eff)) : null, effN: es.length, skid: ks.length ? mean(ks.map(m => m.skid)) : null, skidN: ks.length,
+      longSkid: ms.filter(m => m.phase === 'skid').length
+    };
   }
 
   /* ---------- live camera ---------- */
   let stream = null, running = false, tracker = null, runs = [], lastRun = null;
   let restSince = null, beeped = false, curDropped = 0, confirmFails = 0;
-  const DROP_WARN = 2;   // missed frames around one putt before it is flagged as less precise
+  const DROP_WARN = 4;   // missed frames while the ball is moving before a putt is flagged as less precise
   const ang1 = a => Math.round(Math.abs(a) * 10) / 10;
   let tBase = null, lastT = null, gaps = [], fpsLive = null, lastDims = '', live = { D: [], track: null, rest: null };
   // Frame clock: the camera shoots at a steady rate, so time = frame count / frame rate.
@@ -977,10 +1135,11 @@ input[type=number]{width:7em}
 
   function measureFrame(t, gap) {
     const seed = S.seed;
-    const D = detectBalls(seed, seed.restored ? null : seed.ref) || [];
+    const D = detectBalls(seed, seed.restored ? null : seed.ref, tracker.region(t)) || [];
     const prevState = tracker.state();
-    if (gap != null && fpsLive && prevState !== 'wait') { const miss = Math.round(gap * fpsLive) - 1; if (miss > 0) curDropped += miss; }
+    const miss = gap != null && fpsLive ? Math.max(0, Math.round(gap * fpsLive) - 1) : 0;
     const res = tracker.step(t, D);
+    if (miss && (prevState === 'move' || tracker.state() === 'move')) curDropped += miss;
     const st = tracker.state(), rest = tracker.rest();
     if (rest) { if (restSince == null) restSince = t; } else { restSince = null; if (st !== 'move') beeped = false; }
     if (st === 'wait' && prevState !== 'move') curDropped = 0;
@@ -1021,27 +1180,35 @@ input[type=number]{width:7em}
     S.seed = run.seed;
     try { return runMetrics(run); } finally { S.seed = keep; }
   }
-  // A real roll slows smoothly and frames arrive evenly; anything else is a glitch and is not read out as a result.
+  // A real putt slows smoothly and frames arrive evenly; anything else is a glitch and is not read out as a result.
+  // Each step's speed must match its neighbours (the ball may slow right down to a stop inside a long view),
+  // and the ball never speeds up.
   function trackOk(run) {
-    const pts = [run.c0 ? { t: run.tRest, x: run.c0.x, y: run.c0.y } : null].concat(run.pts).filter(Boolean).slice(1);
+    const pts = run.pts;
     if (pts.length < 3) return false;
+    const floor = 0.12 * 1000 / (BALL_MM / (2 * run.seed.r));   // 0.12 m/s in pixels per second
     const sp = [];
     for (let i = 1; i < pts.length; i++) {
       const dt = pts[i].t - pts[i - 1].t;
       if (!(dt > 0) || (fpsLive && dt < 0.6 / fpsLive)) return false;
       sp.push(Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y) / dt);
     }
-    const md = median(sp);
-    return md > 0 && sp.every(v => v > 0.55 * md && v < 1.6 * md);
+    if (!(sp[0] > 0)) return false;
+    for (let i = 0; i < sp.length; i++) {
+      const nb = i === 0 ? sp[1] : i === sp.length - 1 ? sp[i - 1] : (sp[i - 1] + sp[i + 1]) / 2;
+      if (Math.abs(sp[i] - nb) > 0.3 * nb + floor) return false;
+    }
+    return sp.every(v => v < 1.2 * sp[0] + floor);
   }
   function onPutt(run) {
     run.seed = { x: S.seed.x, y: S.seed.y, r: S.seed.r };
+    run.tilt = tiltDeg;
     run.dropped = curDropped >= DROP_WARN; curDropped = 0;
     const m = metricsFor(run);
     if (!m || !(m.v0 > 0.2 && m.v0 < 8)) return;
     // A putt rolls roughly along the target line; something moving off at a steep angle is not a putt.
     if (S.view === 'top' && S.target && m.ang != null && Math.abs(m.ang) > 20) return;
-    if (!trackOk(run) || m.v0 > 6 || m.roll > 25) {
+    if (!trackOk(run) || m.v0 > 6 || m.roll > 40) {
       speak('측정이 불안정했어요. 한 번 더 쳐주세요');
       setPill('warn', '측정 실패 · 다시 쳐주세요');
       return;
@@ -1068,8 +1235,44 @@ input[type=number]{width:7em}
     }
     const di = diffInfo(m);
     if (say.diff && di) p.push(di.hit ? '거리 딱 맞아요' : `${di.cm}센티 ${di.word}`);
+    if (say.roll) {
+      if (m.phase === 'knot') p.push(`구름 ${Math.round(m.eff * 100)}퍼센트`);
+      else if (m.phase === 'skid') p.push('끝까지 미끄러졌어요');
+      else if (m.phase === 'roll' && m.eff != null) p.push('바로 굴렀어요');
+    }
     if (dropped) p.push('프레임이 빠져서 덜 정확해요');
     return p.join(', ');
+  }
+
+  /* ---------- phone tilt ---------- */
+  // Looking straight down, the picture has one scale everywhere. Tilted, the far side shrinks or stretches and the
+  // rolling speed measured there is off by about 4% per degree, so the tilt is shown while setting up.
+  let tiltDeg = null, tiltOn = false, tiltShown = 0;
+  function onOrient(e) {
+    if (e.beta == null || e.gamma == null) return;
+    const c = Math.cos(e.beta * Math.PI / 180) * Math.cos(e.gamma * Math.PI / 180);
+    const d = Math.acos(clamp(Math.abs(c), 0, 1)) * 180 / Math.PI;
+    tiltDeg = tiltDeg == null ? d : 0.85 * tiltDeg + 0.15 * d;
+    const now = performance.now();
+    if (now - tiltShown > 250) { tiltShown = now; renderTilt(); }
+  }
+  function startTilt() {
+    if (tiltOn || typeof window.DeviceOrientationEvent === 'undefined') return;
+    const go = () => { if (tiltOn) return; tiltOn = true; window.addEventListener('deviceorientation', onOrient); };
+    try {
+      // iPhone asks once; this must run straight from the tap on the camera button.
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') DeviceOrientationEvent.requestPermission().then(st => { if (st === 'granted') go(); }).catch(() => {});
+      else go();
+    } catch (e) {}
+  }
+  function renderTilt() {
+    const b = $('#tiltBadge');
+    const show = tiltDeg != null && S.view === 'top' && tiltDeg < 45;
+    b.hidden = !show;
+    if (!show) return;
+    const warn = tiltDeg > 2;
+    b.classList.toggle('warn', warn);
+    b.textContent = `기울기 ${tiltDeg.toFixed(1)}°` + (warn ? ' · 폰을 매트와 평행하게' : '');
   }
 
   /* ---------- sound ---------- */
@@ -1229,6 +1432,42 @@ input[type=number]{width:7em}
 
   const fmtAngTxt = a => a == null ? '—' : S.view === 'side' ? (a > 0 ? '+' : '') + a.toFixed(1) + '°' : ang1(a) === 0 ? '0.0°' : (a > 0 ? '오 ' : '왼 ') + ang1(a).toFixed(1) + '°';
   function put(id, v, s) { $('#' + id).textContent = v; if (s != null) $('#' + id + 'S').textContent = s; }
+  // Slide → roll readout for one putt, an average, and the short form for the list.
+  const cmOf = x => Math.round(x * 100);
+  function rollInfo(m) {
+    if (!m || !m.phase) return { v: '—', u: '', s: '—', frac: null };
+    const seen = `화면에서 ${cmOf(m.seen)}cm 따라감`;
+    if (m.phase === 'knot') return { v: String(Math.round(m.eff * 100)), u: '%', s: `${cmOf(m.skid)}cm 미끄러지고 ${m.vRoll.toFixed(2)} m/s로 구르기 시작`, frac: clamp(m.skid / m.seen, 0, 1), seen };
+    if (m.phase === 'skid') return { v: '≤' + Math.round(m.effMax * 100), u: '%', s: `화면 끝(${cmOf(m.seen)}cm)까지 계속 미끄러졌어요. 거리는 미끄러짐이 곧 끝난다고 보고 계산해요.`, frac: 1, cont: true, seen };
+    if (m.phase === 'roll' && m.eff != null) return { v: String(Math.min(100, Math.round(m.eff * 100))), u: '%', s: `처음부터 굴렀어요 · 미끄러짐 ${Math.max(1, cmOf(m.skid))}cm 이하`, frac: clamp(m.skid / m.seen, 0, 1), seen };
+    if (m.phase === 'roll') return { v: '—', u: '', s: `${Math.max(1, cmOf(m.skid))}cm 안에 구르기 시작했어요. 느린 퍼팅은 미끄러짐이 워낙 짧아서 구름 효율을 재지 못해요.`, frac: clamp(m.skid / m.seen, 0, 1), seen };
+    return { v: '—', u: '', s: '따라간 거리가 짧아서 미끄러짐과 구름을 구분하지 못했어요.', frac: null };
+  }
+  function rollAvg(s) {
+    if (s.eff == null) return { v: '—', u: '', s: s.longSkid ? `${s.longSkid}개 모두 화면 끝까지 미끄러졌어요` : '구분된 퍼팅이 없어요', frac: null };
+    const parts = [];
+    if (s.skid != null) parts.push(`평균 ${cmOf(s.skid)}cm 미끄러짐`);
+    parts.push(`${s.effN}개 평균`);
+    if (s.longSkid) parts.push(`${s.longSkid}개는 화면 끝까지 미끄러짐`);
+    return { v: String(Math.round(s.eff * 100)), u: '%', s: parts.join(' · '), frac: null };
+  }
+  const effCell = m => m.eff != null ? Math.min(100, Math.round(m.eff * 100)) + '%' : m.phase === 'skid' ? '끝까지' : '—';
+  function showRollInfo(ri, pre) {
+    put(pre + 'Eff', ri.v, ri.s);
+    $('#' + pre + 'EffU').textContent = ri.u;
+    const bar = $('#' + pre + 'Bar');
+    bar.hidden = ri.frac == null; bar.parentElement.querySelector('.lg').hidden = ri.frac == null;
+    bar.classList.toggle('cont', !!ri.cont);
+    bar.querySelector('i').style.width = ri.frac == null ? '0' : (ri.frac * 100).toFixed(1) + '%';
+    $('#' + pre + 'Seen').textContent = ri.seen || '';
+  }
+
+  function exampleTiles() {
+    put('lSpeed', '2.02', '4.5 mph · 임팩트 직후'); put('lRoll', '2.1', '6.9 ft · 스팀프 10 기준');
+    put('lAng', S.view === 'top' ? '0.7' : '+1.2', S.view === 'top' ? '목표선 왼쪽' : '위로 떠서 출발');
+    $('#lDiffU').textContent = 'm'; put('lDiff', '−0.9', '목표 3.0m');
+    showRollInfo({ v: '72', u: '%', s: '38cm 미끄러지고 1.46 m/s로 구르기 시작', frac: 0.4, seen: '화면에서 95cm 따라감' }, 'l');
+  }
   function renderResults() {
     const last = $('#last'), ex = !lastRun;
     last.classList.toggle('example', ex); $('#lastEx').hidden = !ex;
@@ -1244,11 +1483,12 @@ input[type=number]{width:7em}
         if (m.ang == null) put('lAng', '—', S.view === 'top' ? '목표선을 그으면 나와요' : '—');
         else if (S.view === 'top') { const a = ang1(m.ang); put('lAng', a.toFixed(1), a === 0 ? '목표선과 일치' : m.ang > 0 ? '목표선 오른쪽' : '목표선 왼쪽'); }
         else put('lAng', (m.ang > 0 ? '+' : '') + m.ang.toFixed(1), m.ang >= 0 ? '위로 떠서 출발' : '눌려서 출발');
+        showRollInfo(rollInfo(m), 'l');
         const di = diffInfo(m);
         if (di) { $('#lDiffU').textContent = 'cm'; put('lDiff', di.hit ? '±' + di.cm : (di.d < 0 ? '−' : '+') + di.cm, `목표 ${fmtNum(settings.target)}m · ${di.word}`); tile.classList.add(di.hit ? 'hit' : di.d < 0 ? 'short' : 'long'); }
         else { $('#lDiffU').textContent = ''; put('lDiff', '—', '설정에서 목표 거리를 정하세요'); }
       }
-    } else $('#lastNo').textContent = '';
+    } else { $('#lastNo').textContent = ''; exampleTiles(); }
     renderRuns();
   }
   function renderRuns() {
@@ -1263,7 +1503,7 @@ input[type=number]{width:7em}
       const row = document.createElement('div');
       row.className = 'run' + (r.ex ? ' excl' : '');
       const di = r.m ? diffInfo(r.m) : null;
-      const cells = [String(r.i + 1) + (r.dropped ? '!' : ''), r.m ? r.m.v0.toFixed(2) : '—', r.m ? fmtAngTxt(r.m.ang) : '—', r.m ? r.m.roll.toFixed(1) + 'm' : '—', di ? (di.hit ? '맞음' : (di.d < 0 ? '−' : '+') + di.cm + 'cm') : '—'];
+      const cells = [String(r.i + 1) + (r.dropped ? '!' : ''), r.m ? r.m.v0.toFixed(2) : '—', r.m ? fmtAngTxt(r.m.ang) : '—', r.m ? r.m.roll.toFixed(1) + 'm' : '—', r.m ? effCell(r.m) : '—', di ? (di.hit ? '맞음' : (di.d < 0 ? '−' : '+') + di.cm + 'cm') : '—'];
       cells.forEach((c, ci) => { const s = document.createElement('span'); s.textContent = c; if (ci === 0 && r.dropped) { s.className = 'flag'; s.title = '프레임이 빠져서 덜 정확해요'; } row.appendChild(s); });
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'ex'; b.dataset.ex = r.i; b.textContent = r.ex ? '포함' : '제외';
@@ -1279,6 +1519,7 @@ input[type=number]{width:7em}
       add('평균 스피드', `${s.v.toFixed(2)} m/s`);
       if (s.n >= 2) add('속도 편차', `±${s.cv.toFixed(1)}%`);
       add('평균 거리', `${s.roll.toFixed(1)} m`);
+      if (s.eff != null) add('구름 효율', `${Math.round(s.eff * 100)}%` + (s.skid != null ? ` · 미끄러짐 ${cmOf(s.skid)}cm` : ''));
       if (s.ang != null) add('방향', `${S.view === 'top' ? (ang1(s.ang) === 0 ? '' : s.ang > 0 ? '오 ' : '왼 ') + ang1(s.ang).toFixed(1) : s.ang.toFixed(1)}°` + (s.angSd != null ? ` ±${s.angSd.toFixed(1)}°` : ''));
     } else add('', '아직 기록이 없어요');
   }
@@ -1286,10 +1527,10 @@ input[type=number]{width:7em}
   function updateAll() { renderControls(); updateHint(); renderResults(); draw(); }
 
   /* ---------- wiring ---------- */
-  $('#camOn').addEventListener('click', () => { unlockSound(); startCamera(); });
+  $('#camOn').addEventListener('click', () => { startTilt(); unlockSound(); startCamera(); });
   $('#run').addEventListener('click', () => { if (running) stopRun(false); else startRun(); });
   $$('[data-tool]').forEach(b => b.addEventListener('click', () => { if (running) return; S.tool = b.dataset.tool; S.pendingA = null; S.note = null; updateAll(); }));
-  $$('[data-view]').forEach(b => b.addEventListener('click', () => { if (running) return; S.view = b.dataset.view; S.pendingA = null; S.note = null; saveSetup(); updateAll(); }));
+  $$('[data-view]').forEach(b => b.addEventListener('click', () => { if (running) return; S.view = b.dataset.view; S.pendingA = null; S.note = null; saveSetup(); updateAll(); renderTilt(); }));
   $('#reset').addEventListener('click', () => {
     const b = $('#reset');
     if (!armed) { b.textContent = '한 번 더 누르면 지워져요'; b.classList.add('armed'); armed = setTimeout(() => { armed = null; b.textContent = '설정 지우기'; b.classList.remove('armed'); }, 3000); return; }
@@ -1305,8 +1546,17 @@ input[type=number]{width:7em}
     const r6 = v => Math.round(v * 1e4) / 1e4;
     const data = {
       ua: navigator.userAgent, fps: fpsLive, timeSource: tBase, jitterMs: jitterMs && r6(jitterMs), video: [vid.videoWidth, vid.videoHeight],
-      stimp: settings.stimp, seed: S.seed && { x: r6(S.seed.x), y: r6(S.seed.y), r: r6(S.seed.r) },
-      putts: runs.map(r => { const m = metricsFor(r); return { v0: m && r6(m.v0), roll: m && r6(m.roll), ang: m && m.ang != null ? r6(m.ang) : null, dropped: !!r.dropped, tRest: r6(r.tRest), c0: [r6(r.c0.x), r6(r.c0.y)], pts: r.pts.map(p => [r6(p.t), r6(p.x), r6(p.y)]) }; })
+      stimp: settings.stimp, tilt: tiltDeg != null ? r6(tiltDeg) : null,
+      seed: S.seed && { x: r6(S.seed.x), y: r6(S.seed.y), r: r6(S.seed.r), ell: S.seed.ell ? [r6(S.seed.ell.a), r6(S.seed.ell.b), r6(S.seed.ell.ang)] : null },
+      putts: runs.map(r => {
+        const m = metricsFor(r);
+        return {
+          v0: m && r6(m.v0), roll: m && r6(m.roll), ang: m && m.ang != null ? r6(m.ang) : null,
+          phase: m && m.phase, skid: m && m.skid != null ? r6(m.skid) : null, vRoll: m && m.vRoll != null ? r6(m.vRoll) : null,
+          eff: m && m.eff != null ? r6(m.eff) : null, seen: m && r6(m.seen), d1: m && m.d1 != null ? r6(m.d1) : null, d2: m && m.d2 != null ? r6(m.d2) : null,
+          tilt: r.tilt != null ? r6(r.tilt) : null, dropped: !!r.dropped, tRest: r6(r.tRest), c0: [r6(r.c0.x), r6(r.c0.y)], pts: r.pts.map(p => [r6(p.t), r6(p.x), r6(p.y)])
+        };
+      })
     };
     const text = JSON.stringify(data);
     const b = $('#copyData');
@@ -1315,18 +1565,18 @@ input[type=number]{width:7em}
   });
   $('#runsBody').addEventListener('click', e => { const b = e.target.closest('.ex'); if (!b) return; const r = runs[+b.dataset.ex]; if (r) { r.ex = !r.ex; renderResults(); } });
 
-  const ids = { saySpeed: 'speed', sayDist: 'dist', sayDir: 'dir', sayDiff: 'diff' };
+  const ids = { saySpeed: 'speed', sayDist: 'dist', sayDir: 'dir', sayDiff: 'diff', sayRoll: 'roll' };
   Object.keys(ids).forEach(id => { const el = $('#' + id); el.checked = !!settings.say[ids[id]]; el.addEventListener('change', () => { settings.say[ids[id]] = el.checked; saveSettings(); }); });
   const beepEl = $('#beepOn'); beepEl.checked = !!settings.beep; beepEl.addEventListener('change', () => { settings.beep = beepEl.checked; saveSettings(); });
   $('#testVoice').addEventListener('click', () => {
     unlockSound(); if (settings.beep) beep();
-    const m = lastRun ? metricsFor(lastRun) : { v0: 2.02, roll: 2.1, ang: -0.7 };
+    const m = lastRun ? metricsFor(lastRun) : { v0: 2.02, roll: 2.1, ang: -0.7, phase: 'knot', eff: 0.72 };
     setTimeout(() => speak(sayText(m, false)), 250);
   });
   const targetEl = $('#target'); targetEl.value = String(settings.target || 0);
   targetEl.addEventListener('input', () => { const v = parseFloat(targetEl.value); if (v >= 0 && v <= 30) { settings.target = v; saveSettings(); renderResults(); } });
   const stimpEl = $('#stimp'); stimpEl.value = String(settings.stimp);
-  stimpEl.addEventListener('input', () => { const v = parseFloat(stimpEl.value); if (v >= 3 && v <= 16) { settings.stimp = v; saveSettings(); renderResults(); } });
+  stimpEl.addEventListener('input', () => { const v = parseFloat(stimpEl.value); if (v >= 3 && v <= 30) { settings.stimp = v; saveSettings(); renderResults(); } });
   const fpsEl = $('#fpsSel'); fpsEl.value = settings.fps === '30' ? '30' : '60';
   fpsEl.addEventListener('change', () => { settings.fps = fpsEl.value; saveSettings(); if (stream) { const was = running; if (was) stopRun(true); startCamera(); } });
   const camEl = $('#camSel');
