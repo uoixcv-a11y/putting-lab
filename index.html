@@ -201,9 +201,9 @@ input[type=number]{width:7em}
     <div class="rhead"><h2>최근 퍼팅 <span class="sub" id="lastNo"></span></h2><span class="badge" id="lastEx">예시</span></div>
     <div class="tiles">
       <div class="tile"><span class="k">볼 스피드</span><div class="v"><span id="lSpeed">2.02</span><small>m/s</small></div><span class="s" id="lSpeedS">4.5 mph · 임팩트 직후</span></div>
-      <div class="tile"><span class="k">예상 굴림 거리</span><div class="v"><span id="lRoll">2.1</span><small>m</small></div><span class="s" id="lRollS">스팀프 10 기준</span></div>
+      <div class="tile"><span class="k">예상 굴림 거리</span><div class="v"><span id="lRoll">3.6</span><small>m</small></div><span class="s" id="lRollS">스팀프 10 기준</span></div>
       <div class="tile"><span class="k" id="lAngK">출발 방향</span><div class="v"><span id="lAng">0.7</span><small>°</small></div><span class="s" id="lAngS">목표선 왼쪽</span></div>
-      <div class="tile" id="lDiffTile"><span class="k">목표 대비</span><div class="v"><span id="lDiff">−0.9</span><small id="lDiffU">m</small></div><span class="s" id="lDiffS">목표 3.0m</span></div>
+      <div class="tile" id="lDiffTile"><span class="k">목표 대비</span><div class="v"><span id="lDiff">+0.6</span><small id="lDiffU">m</small></div><span class="s" id="lDiffS">목표 3.0m</span></div>
       <div class="tile wide">
         <span class="k">구름 효율 <span class="kk">· 구르기 시작할 때 남은 속도, 보통 71%</span></span>
         <div class="v"><span id="lEff">72</span><small id="lEffU">%</small></div>
@@ -248,7 +248,7 @@ input[type=number]{width:7em}
       <div class="field">
         <label for="stimp">그린 빠르기 (스팀프, 피트)</label>
         <input type="number" id="stimp" min="3" max="30" step="0.5" inputmode="decimal">
-        <p class="help">예상 거리를 이 빠르기의 그린 기준으로 계산해요. 한국식 그린 스피드 2.8m는 9.2예요. 매트 실제 거리에 맞추려면 매트 스팀프를 넣으세요. 빠른 매트는 20을 넘기도 해요.</p>
+        <p class="help">예상 거리를 이 빠르기의 그린 기준으로 계산해요. 한국식 그린 스피드 2.8m는 9.2예요. 매트에서 공이 실제로 멈춘 거리에 맞춰 넣으면 그게 그 매트의 빠르기예요. 매트는 보통 8~13 정도예요.</p>
       </div>
       <div class="field">
         <label for="fpsSel">카메라 프레임</label>
@@ -273,7 +273,8 @@ input[type=number]{width:7em}
 
   <ul class="notes">
     <li>공을 출발 자리에 놓고 멈추면 띵 소리가 나요. 그다음 퍼팅하면 공이 화면 끝까지 굴러간 뒤 결과를 읽어줘요.</li>
-    <li>공은 처음에 미끄러지다가 구르기 시작해요. 화면에서 그 지점을 찾아 미끄러진 거리와 구르기 시작한 속도를 재고, 예상 거리는 그 속도로 계산해요. 구름 효율은 그때 속도가 출발 속도의 몇 %인지예요. 스핀 없이 맞은 공은 71%이고, 높을수록 덜 미끄러진 거예요.</li>
+    <li>공은 처음에 미끄러지다가 구르기 시작해요. 화면에서 그 지점을 찾아 미끄러진 거리와 구르기 시작한 속도를 재요. 구름 효율은 그때 속도가 출발 속도의 몇 %인지예요. 스핀 없이 맞은 공은 71%이고, 높을수록 덜 미끄러진 거예요.</li>
+    <li>예상 거리는 "스팀프미터 공의 출발 속도(1.83m/s)로 친 퍼팅은 스팀프 거리만큼 간다"를 기준으로, 실제 그린에서 잰 런치 모니터 값과 GSPro 퍼팅 표에 맞춘 곡선으로 계산해요. 구름 효율이 보통보다 좋으면 조금 더, 많이 미끄러지면 조금 덜 가요(최대 ±10%).</li>
     <li>빠르게 친 공은 화면에서 길게 번져 보여요. 밝은 곳에서 하면 카메라 셔터가 짧아져서 더 잘 잡혀요. 설정에 손전등이 보이면 켜보세요. 그래도 못 잡으면 "측정 데이터 복사"에 이유가 같이 담겨요.</li>
     <li>폰이 기울어 있으면 화면 먼 쪽의 거리가 틀어져서 구르는 속도가 달라져요. 화면 왼쪽 위에 폰 기울기가 나오니 1° 안쪽으로 맞추세요.</li>
     <li>볼 스피드는 공 지름(42.67mm)과 카메라 프레임 시간으로 재요. 매트 빠르기나 경사와는 상관없어요.</li>
@@ -960,6 +961,22 @@ input[type=number]{width:7em}
     return { v0: a1 + 2 * a2 * x, tauI: x + x0 };
   }
 
+  // How far a putt launched at v (m/s) goes on a green of the set stimp.
+  // Reference: a ball launched at the stimpmeter's speed (1.83 m/s) goes the stimp distance. The stimp reading already
+  // includes that ball's own start (it too skids and bounces as it comes off the ramp), so launch speeds are compared
+  // directly; taking the putt's slide off first, and then applying the stimp, would count the start loss twice and
+  // come out 20-40% short. Up to 1.83 m/s the distance grows with speed², above that more slowly (speed^1.55): this
+  // follows a launch monitor on a real stimp-11 green (to 6 m) and the GSPro putting chart (to 15 m).
+  // The measured roll efficiency nudges it: a ball that rolled better than a typical one (71%) goes a little farther,
+  // one that slid more a little less, by at most 10%.
+  function greenDist(v, eff) {
+    if (!(v > 0)) return 0;
+    const S = settings.stimp * FT;
+    let d = S * Math.pow(v / STIMP_V, v <= STIMP_V ? 2 : 1.55);
+    if (eff != null && eff > 0) d *= clamp((eff / (5 / 7)) * (eff / (5 / 7)), 0.9, 1.1);
+    return d;
+  }
+
   // Speed, roll and angle for one tracked putt with the current settings (stimp, target line and calibration can change afterwards).
   function runMetrics(run) {
     const P = tabs.putt;
@@ -1008,13 +1025,13 @@ input[type=number]{width:7em}
     }
     if (!(v0 >= 0.9 * pair && v0 <= 1.6 * pair)) v0 = pair;
     tauI = clamp(Number.isFinite(tauI) ? tauI : 0, 0, S[0].tau);
-    // Distance: the ball slides first, then rolls; only the rolling part depends on green speed.
+    // Slide and roll, as measured (shown as slide distance, rolling speed and roll efficiency):
     //  knot  – the switch is in view: slid sT, started rolling at vT (both measured).
     //  skid  – still sliding at the edge of the picture: keeps sliding at the measured rate until 5/7 of the launch
     //          speed (a ball without spin), or rolls from the last seen speed if it is already slower.
     //  roll  – rolling from the first frames: the slide was shorter than the first few centimetres.
     //  else  – too few points to tell: no-spin ball (rolls at 5/7 of launch speed) sliding at 2.7 m/s².
-    const a = STIMP_V * STIMP_V / (2 * settings.stimp * FT), SKID_DECEL = 2.7;
+    const SKID_DECEL = 2.7;
     let skid, vRoll, eff = null, effMax = null;
     if (ph.kind === 'knot') { skid = ph.sT; vRoll = Math.min(ph.vT, v0); eff = vRoll / v0; }
     else if (ph.kind === 'skid') {
@@ -1029,7 +1046,7 @@ input[type=number]{width:7em}
       if (noSpinSlide > 2 * Math.max(ph.sFirst, 0.03)) eff = vRoll / v0;
     }
     else { vRoll = 5 / 7 * v0; skid = (v0 * v0 - vRoll * vRoll) / (2 * SKID_DECEL); }
-    const roll = skid + vRoll * vRoll / (2 * a);
+    const roll = greenDist(v0, eff);
     const ag = angleFor({ x: ux, y: uy }, P);
     return {
       v0, roll, vEnd: vRoll, vRoll, skid, eff, effMax, phase: ph.kind, seen: ph.sEnd != null ? ph.sEnd : S[S.length - 1].s,
@@ -1404,7 +1421,7 @@ input[type=number]{width:7em}
     if (!m || !(m.v0 > 0.2 && m.v0 < 8)) { fail('speed'); return; }
     // A putt rolls roughly along the target line; something moving off at a steep angle is not a putt.
     if (S.view === 'top' && S.target && m.ang != null && Math.abs(m.ang) > 20) { fail('angle ' + m.ang.toFixed(1)); return; }
-    const why = cl.why || (m.v0 > 6 ? 'v0>6' : m.roll > 40 ? 'roll>40' : '');
+    const why = cl.why || (m.v0 > 6 ? 'v0>6' : m.roll > 80 ? 'roll>80' : '');
     if (why) {
       fail(why);
       speak('측정이 불안정했어요. 한 번 더 쳐주세요');
@@ -1664,9 +1681,9 @@ input[type=number]{width:7em}
   }
 
   function exampleTiles() {
-    put('lSpeed', '2.02', '4.5 mph · 임팩트 직후'); put('lRoll', '2.1', '6.9 ft · 스팀프 10 기준');
+    put('lSpeed', '2.02', '4.5 mph · 임팩트 직후'); put('lRoll', '3.6', '11.8 ft · 스팀프 10 기준');
     put('lAng', S.view === 'top' ? '0.7' : '+1.2', S.view === 'top' ? '목표선 왼쪽' : '위로 떠서 출발');
-    $('#lDiffU').textContent = 'm'; put('lDiff', '−0.9', '목표 3.0m');
+    $('#lDiffU').textContent = 'm'; put('lDiff', '+0.6', '목표 3.0m');
     showRollInfo({ v: '72', u: '%', s: '38cm 미끄러지고 1.46 m/s로 구르기 시작', frac: 0.4, seen: '화면에서 95cm 따라감' }, 'l');
   }
   function renderResults() {
@@ -1774,7 +1791,7 @@ input[type=number]{width:7em}
   const beepEl = $('#beepOn'); beepEl.checked = !!settings.beep; beepEl.addEventListener('change', () => { settings.beep = beepEl.checked; saveSettings(); });
   $('#testVoice').addEventListener('click', () => {
     unlockSound(); if (settings.beep) beep();
-    const m = lastRun ? metricsFor(lastRun) : { v0: 2.02, roll: 2.1, ang: -0.7, phase: 'knot', eff: 0.72 };
+    const m = lastRun ? metricsFor(lastRun) : { v0: 2.02, roll: 3.6, ang: -0.7, phase: 'knot', eff: 0.72 };
     setTimeout(() => speak(sayText(m, false)), 250);
   });
   const targetEl = $('#target'); targetEl.value = String(settings.target || 0);

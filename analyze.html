@@ -436,7 +436,7 @@ input[type=number]{width:7em}
       <div class="field">
         <label for="stimp">그린 빠르기 (스팀프)</label>
         <input type="number" id="stimp" min="3" max="30" step="0.5" inputmode="decimal">
-        <p class="help">예상 굴림 거리 계산에 써요. 숫자가 클수록 빠른 그린이에요. 실제 그린은 보통 8~12, 빠른 퍼팅 매트는 20을 넘기도 해요.</p>
+        <p class="help">예상 굴림 거리 계산에 써요. 숫자가 클수록 빠른 그린이에요. 실제 그린은 보통 8~12예요. 매트에서 공이 실제로 멈춘 거리에 맞춰 넣으면 그게 그 매트의 빠르기예요.</p>
       </div>
       <fieldset class="field">
         <legend>보정 기준</legend>
@@ -454,11 +454,11 @@ input[type=number]{width:7em}
     <li>퍼팅 출발 자리, 목표선, 보정은 이 기기에 저장돼서 다음 영상에도 그대로 쓰여요. 카메라를 옮기면 출발 자리를 다시 찍고, 처음부터 다시 하려면 모두 지우기를 두 번 누르세요.</li>
     <li>퍼팅 자동 분석은 영상을 4배속으로 훑어 출발 자리의 공이 떠나는 순간을 찾고, 그 앞뒤만 0.5배속으로 다시 보며 공을 화면 끝까지 따라가 재요. 이때 건너뛴 프레임이 있으면 더 느리게 다시 재서, 같은 영상은 몇 번을 돌려도 같은 값이 나와요. 잘못 잡힌 퍼팅은 목록에서 제외할 수 있어요.</li>
     <li>60fps로 찍으면 퍼팅마다 잡히는 공 위치가 두 배로 늘어서 볼 스피드가 더 정확해져요. 프레임은 영상에 기록된 실제 시간으로 계산해서, 자동 감지로 두면 30fps와 60fps 모두 맞게 재요. 30fps나 60fps를 직접 고르면 영상이 다르게 찍혔을 때 알려줘요.</li>
-    <li>볼 스피드는 임팩트 직후 속도예요. 공은 처음에 미끄러지며 빨리 느려지다가 구르기 시작해요. 화면에서 그 지점을 찾아 미끄러진 거리와 구르기 시작한 속도를 재고, 굴림 거리는 그 속도로 계산해요. 구름 효율은 구르기 시작할 때 속도가 출발 속도의 몇 %인지예요. 스핀 없이 맞은 공은 71%이고, 높을수록 덜 미끄러진 거예요.</li>
+    <li>볼 스피드는 임팩트 직후 속도예요. 공은 처음에 미끄러지며 빨리 느려지다가 구르기 시작해요. 화면에서 그 지점을 찾아 미끄러진 거리와 구르기 시작한 속도를 재요. 구름 효율은 구르기 시작할 때 속도가 출발 속도의 몇 %인지예요. 스핀 없이 맞은 공은 71%이고, 높을수록 덜 미끄러진 거예요.</li>
     <li>폰이 기울어 있으면 화면 먼 쪽의 거리가 줄어들거나 늘어나서 구르는 속도가 틀어져요. 폰 화면을 매트와 평행하게 맞춰 찍으세요.</li>
     <li>세게 친 공은 화면에서 길게 번져 보여요. 공이 멈춰 있을 때의 화면을 배경으로 기억해뒀다가, 움직인 부분만 보고 번진 공을 찾아요. 그래도 밝은 곳에서 찍을수록 덜 번져서 잘 잡혀요.</li>
     <li>점을 누르고 있으면 확대경이 떠요. 손가락을 움직여 정확히 맞춘 뒤 떼세요. 컴퓨터에서는 ← → 키로 프레임을 넘길 수 있어요.</li>
-    <li>예상 굴림 거리는 공이 일정하게 감속한다고 보고 계산한 추정치예요. 스팀프미터 경사대를 떠나는 공 속도(약 1.83m/s, 6ft/s)가 기준이에요.</li>
+    <li>예상 굴림 거리는 "스팀프미터 공의 출발 속도(1.83m/s, 4.1mph)로 친 퍼팅은 스팀프 거리만큼 간다"를 기준으로, 실제 그린에서 잰 런치 모니터 값과 GSPro 퍼팅 표에 맞춘 곡선으로 계산해요. 그보다 빠르면 속도에 비해 덜 늘어나요. 구름 효율이 보통(71%)보다 좋으면 조금 더, 많이 미끄러지면 조금 덜 가요(최대 ±10%).</li>
   </ul>
 </div>
 
@@ -956,7 +956,7 @@ input[type=number]{width:7em}
       r.vAvg = r.distM / r.dt;
       const a = STIMP_V * STIMP_V / (2 * settings.stimp * FT);
       r.v1 = r.vAvg + a * r.dt / 2;
-      r.roll = r.v1 * r.v1 / (2 * a);
+      r.roll = greenDist(r.v1, null);
     }
     const b = { x: dx, y: dy };
     if (P.view === 'top') {
@@ -1228,7 +1228,7 @@ input[type=number]{width:7em}
     small: '공이 너무 작게 찍혔어요. 폰을 공에 더 가까이 두고 찍어주세요.',
     big: '공 크기를 재지 못했어요. 공 한가운데를 다시 찍어주세요.'
   };
-  const EX_RUNS = [[2.21, 0.6, 2.4, 0.72], [2.14, -0.3, 2.2, 0.70], [2.26, 1.1, 2.5, 0.74], [2.08, 0.2, 2.1, 0.69], [2.18, -0.4, 2.3, 0.71]];
+  const EX_RUNS = [[2.21, 0.6, 4.1, 0.72], [2.14, -0.3, 3.7, 0.70], [2.26, 1.1, 4.5, 0.74], [2.08, 0.2, 3.5, 0.69], [2.18, -0.4, 4.0, 0.71]];
   const RS = 6;            // ball radius in detector pixels
   const ROI_R = 20;        // search area around the start spot while the ball rests, in ball radii
   const MAX_R = 160;       // a putt is followed to the edge of the picture or until it stops; this is only a backstop
@@ -1846,6 +1846,22 @@ input[type=number]{width:7em}
     return { v0: a1 + 2 * a2 * x, tauI: x + x0 };
   }
 
+  // How far a putt launched at v (m/s) goes on a green of the set stimp.
+  // Reference: a ball launched at the stimpmeter's speed (1.83 m/s) goes the stimp distance. The stimp reading already
+  // includes that ball's own start (it too skids and bounces as it comes off the ramp), so launch speeds are compared
+  // directly; taking the putt's slide off first, and then applying the stimp, would count the start loss twice and
+  // come out 20-40% short. Up to 1.83 m/s the distance grows with speed², above that more slowly (speed^1.55): this
+  // follows a launch monitor on a real stimp-11 green (to 6 m) and the GSPro putting chart (to 15 m).
+  // The measured roll efficiency nudges it: a ball that rolled better than a typical one (71%) goes a little farther,
+  // one that slid more a little less, by at most 10%.
+  function greenDist(v, eff) {
+    if (!(v > 0)) return 0;
+    const S = settings.stimp * FT;
+    let d = S * Math.pow(v / STIMP_V, v <= STIMP_V ? 2 : 1.55);
+    if (eff != null && eff > 0) d *= clamp((eff / (5 / 7)) * (eff / (5 / 7)), 0.9, 1.1);
+    return d;
+  }
+
   // Speed, roll and angle for one tracked putt with the current settings (stimp, target line and calibration can change afterwards).
   function runMetrics(run) {
     const P = tabs.putt;
@@ -1894,13 +1910,13 @@ input[type=number]{width:7em}
     }
     if (!(v0 >= 0.9 * pair && v0 <= 1.6 * pair)) v0 = pair;
     tauI = clamp(Number.isFinite(tauI) ? tauI : 0, 0, S[0].tau);
-    // Distance: the ball slides first, then rolls; only the rolling part depends on green speed.
+    // Slide and roll, as measured (shown as slide distance, rolling speed and roll efficiency):
     //  knot  – the switch is in view: slid sT, started rolling at vT (both measured).
     //  skid  – still sliding at the edge of the picture: keeps sliding at the measured rate until 5/7 of the launch
     //          speed (a ball without spin), or rolls from the last seen speed if it is already slower.
     //  roll  – rolling from the first frames: the slide was shorter than the first few centimetres.
     //  else  – too few points to tell: no-spin ball (rolls at 5/7 of launch speed) sliding at 2.7 m/s².
-    const a = STIMP_V * STIMP_V / (2 * settings.stimp * FT), SKID_DECEL = 2.7;
+    const SKID_DECEL = 2.7;
     let skid, vRoll, eff = null, effMax = null;
     if (ph.kind === 'knot') { skid = ph.sT; vRoll = Math.min(ph.vT, v0); eff = vRoll / v0; }
     else if (ph.kind === 'skid') {
@@ -1915,7 +1931,7 @@ input[type=number]{width:7em}
       if (noSpinSlide > 2 * Math.max(ph.sFirst, 0.03)) eff = vRoll / v0;
     }
     else { vRoll = 5 / 7 * v0; skid = (v0 * v0 - vRoll * vRoll) / (2 * SKID_DECEL); }
-    const roll = skid + vRoll * vRoll / (2 * a);
+    const roll = greenDist(v0, eff);
     const ag = angleFor({ x: ux, y: uy }, P);
     return {
       v0, roll, vEnd: vRoll, vRoll, skid, eff, effMax, phase: ph.kind, seen: ph.sEnd != null ? ph.sEnd : S[S.length - 1].s,
