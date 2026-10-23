@@ -938,8 +938,17 @@ input[type=number]{width:7em}
   }
 
   // 60fps has to be asked for firmly: iPhone browsers otherwise pick 1080p at 30fps, and some phones offer 60fps only at 720p.
-  let camMaxFps = null, no60 = false;
+  // settings.camPick: 'auto' = camera found by the 60fps search, 'user' = picked in the list (then it is left alone).
+  let camMaxFps = null, no60 = false, camLog = [];
   const trackFps = st => { try { return st.getVideoTracks()[0].getSettings().frameRate || null; } catch (e) { return null; } };
+  const fmtSt = st => { try { const t = st.getVideoTracks()[0], q = t.getSettings(); return `${t.label || '?'} ${q.width}x${q.height}@${q.frameRate ? Math.round(q.frameRate) : '?'}`; } catch (e) { return '?'; } };
+  const pause = ms => new Promise(r => setTimeout(r, ms));
+  // Every camera request is written down, so a wrong frame rate can be explained from the copied data.
+  async function openCam(video, note) {
+    try { const st = await navigator.mediaDevices.getUserMedia({ audio: false, video }); camLog.push(`${note} → ${fmtSt(st)}`); return st; }
+    catch (e) { camLog.push(`${note} ✗ ${e && e.name}`); throw e; }
+    finally { if (camLog.length > 30) camLog.splice(0, camLog.length - 30); }
+  }
   async function find60(current) {
     let devs = [];
     try { devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); } catch (e) { return null; }
@@ -947,58 +956,73 @@ input[type=number]{width:7em}
     try { curId = current.getVideoTracks()[0].getSettings().deviceId || ''; } catch (e) {}
     const back = d => /back|rear|environment|후면|뒤/i.test(d.label) && !/front|전면/i.test(d.label);
     const skip = d => /ultra|울트라|초광각|tele|망원/i.test(d.label);
-    const list = devs.filter(d => d.deviceId !== curId && back(d) && !skip(d));
-    if (!list.length) return null;
+    // The plain 1x lens first: on iPhones it is the one that does 60fps; the combined dual/triple cameras often don't.
+    const plain = d => !/dual|triple|듀얼|트리플/i.test(d.label);
+    // The camera in use goes last: once it has been let go, it sometimes opens at 60fps on a second try.
+    const list = devs.filter(d => d.deviceId !== curId && back(d) && !skip(d)).sort((a, b) => plain(b) - plain(a))
+      .concat(devs.filter(d => d.deviceId === curId && back(d) && !skip(d)));
+    camLog.push('60fps 찾기: ' + (list.map(d => d.label || '?').join(', ') || '후면 카메라 목록 없음'));
+    if (!list.length) { no60 = true; return current; }
     current.getTracks().forEach(t => t.stop());
+    await pause(250);   // iPhone needs a moment to let go of the camera
     for (const d of list) {
       for (const size of [{ width: { ideal: 1920 }, height: { ideal: 1080 } }, { width: { ideal: 1280 }, height: { ideal: 720 } }]) {
         try {
-          const st = await navigator.mediaDevices.getUserMedia({ audio: false, video: Object.assign({ deviceId: { exact: d.deviceId }, frameRate: { min: 50, ideal: 60 } }, size) });
+          const st = await openCam(Object.assign({ deviceId: { exact: d.deviceId }, frameRate: { min: 50, ideal: 60 } }, size), `${d.label || '?'} ${size.height.ideal}p≥50`);
           const f = trackFps(st);
-          if (!f || f >= 50) { settings.deviceId = d.deviceId; saveSettings(); return st; }
-          st.getTracks().forEach(t => t.stop());
-        } catch (e) {}
+          if (!f || f >= 50) { settings.deviceId = d.deviceId; settings.camPick = 'auto'; saveSettings(); return st; }
+          st.getTracks().forEach(t => t.stop()); await pause(150);
+        } catch (e) { await pause(150); }
       }
     }
-    // None does 60fps: reopen the original camera at its best rate.
+    // None does 60fps: reopen the camera at its best rate.
     try {
-      return await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } } }).then(st => { no60 = true; return st; });
+      no60 = true;
+      return await openCam({ facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } }, '기본 후면 1080p 최대');
     } catch (e) { return null; }
   }
   async function startCamera() {
     stopCamera();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setHint(camError(null), true); return; }
     const want = +settings.fps || 30;
+    camLog = [`원하는 프레임 ${want} · 저장된 카메라 ${settings.deviceId ? (settings.camPick === 'user' ? '직접 고름' : '자동') : '없음'}`];
     const which = () => (settings.deviceId ? { deviceId: { exact: settings.deviceId } } : { facingMode: { ideal: 'environment' } });
     const tries = want >= 60
       ? [
-          { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { min: 50, ideal: 60 } },
-          { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { min: 50, ideal: 60 } },
-          { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } }
+          [{ width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { min: 50, ideal: 60 } }, '1080p≥50'],
+          [{ width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { min: 50, ideal: 60 } }, '720p≥50'],
+          [{ width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } }, '1080p 최대']
         ]
-      : [{ width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 30 } }];
+      : [[{ width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 30 } }, '1080p 30']];
     setHint('카메라를 켜는 중…');
     let err = null;
     for (let pass = 0; pass < 2 && !stream; pass++) {
-      if (pass === 1) { if (!settings.deviceId) break; settings.deviceId = ''; }
-      for (const t of tries) {
-        try { stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: Object.assign(which(), t) }); break; }
+      if (pass === 1) {
+        // The remembered camera can't be opened any more (its id can change): forget it and use the default.
+        if (!settings.deviceId) break;
+        settings.deviceId = ''; settings.camPick = ''; saveSettings();
+      }
+      for (const [t, note] of tries) {
+        try { stream = await openCam(Object.assign(which(), t), (settings.deviceId ? '저장된 카메라 ' : '기본 후면 ') + note); break; }
         catch (e) { err = e; if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError' || e.name === 'NotReadableError')) { pass = 2; break; } }
       }
     }
     if (!stream) { setHint(camError(err), true); return; }
-    // Still 30fps? iPhones often hand the browser a combined multi-lens camera that only does 30fps,
-    // while the single 1x lens can do 60. Try the other back cameras once and remember the one that works.
+    // Still 30fps? iPhones often hand the browser a combined multi-lens camera that only does 30fps, while the single
+    // 1x lens can do 60. Look through the other back cameras and remember the one that works. This also runs when a
+    // camera found earlier comes up at 30fps now; only a camera picked by hand in the list is left as it is.
     no60 = false;
-    if (want >= 60 && !settings.deviceId && trackFps(stream) && trackFps(stream) < 50) {
+    const f0 = trackFps(stream);
+    if (want >= 60 && f0 && f0 < 50 && settings.camPick !== 'user') {
       setHint('60fps가 되는 카메라를 찾는 중…');
-      const alt = await find60(stream);
-      if (alt) stream = alt; else no60 = true;
+      stream = await find60(stream);
+      if (!stream) { setHint(camError(err), true); return; }
     }
     camMaxFps = null;
     try {
       const tr = stream.getVideoTracks()[0], cap = tr.getCapabilities ? tr.getCapabilities() : null;
       if (cap && cap.frameRate && cap.frameRate.max) camMaxFps = cap.frameRate.max;
+      if (cap) camLog.push(`최대 성능: ${cap.width ? cap.width.max + 'x' + (cap.height && cap.height.max) : '?'} · ${cap.frameRate && cap.frameRate.max ? Math.round(cap.frameRate.max) + 'fps' : '?'}`);
     } catch (e) {}
     vid.srcObject = stream;
     try { await vid.play(); } catch (e) {}
@@ -1018,7 +1042,7 @@ input[type=number]{width:7em}
       const sel = $('#camSel'), cur = settings.deviceId;
       sel.textContent = '';
       const def = document.createElement('option'); def.value = ''; def.textContent = '기본 후면 카메라'; sel.appendChild(def);
-      devs.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || `카메라 ${i + 1}`; sel.appendChild(o); });
+      devs.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = (d.label || `카메라 ${i + 1}`) + (d.deviceId === cur && settings.camPick === 'auto' ? ' · 60fps 자동 선택' : ''); sel.appendChild(o); });
       sel.value = devs.some(d => d.deviceId === cur) ? cur : '';
     } catch (e) {}
   }
@@ -1393,8 +1417,10 @@ input[type=number]{width:7em}
   function setPill(s, text) { const p = $('#pill'); if (p.dataset.s !== s) p.dataset.s = s; const el = $('#pillText'); if (el.textContent !== text) el.textContent = text; }
   function renderFps() {
     const src = tBase === 'capture' ? '카메라 촬영 시각' : tBase === 'media' ? '영상 시간' : '화면 표시 시각';
+    let camTxt = '';
+    try { const t = stream.getVideoTracks()[0]; camTxt = `${t.label || '카메라'} · ${vid.videoWidth}×${vid.videoHeight} · `; } catch (e) {}
     $('#timingInfo').textContent = fpsLive
-      ? `${Math.round(fpsLive)}fps · 시간 기준: ${src} · 프레임 간격 흔들림 ±${(jitterMs || 0).toFixed(1)}ms. 흔들림은 프레임 개수로 시간을 다시 계산해서 없애요.`
+      ? `${camTxt}${Math.round(fpsLive)}fps · 시간 기준: ${src} · 프레임 간격 흔들림 ±${(jitterMs || 0).toFixed(1)}ms. 흔들림은 프레임 개수로 시간을 다시 계산해서 없애요.`
       : '측정 중…';
     const b = $('#fpsBadge'), want = +settings.fps;
     b.textContent = fpsLive ? `${Math.round(fpsLive)}fps` : '';
@@ -1405,7 +1431,7 @@ input[type=number]{width:7em}
     if (!stream) { setHint(''); return; }
     if (running) {
       const want = +settings.fps;
-      setHint(fpsLive && want === 60 && fpsLive < 45 ? (no60 ? '이 폰의 브라우저 카메라는 모두 30fps까지만 돼요. 30fps로도 볼 스피드 오차는 2% 안팎이에요.' : camMaxFps && camMaxFps < 50 ? `이 카메라는 브라우저에서 최대 ${Math.round(camMaxFps)}fps까지만 돼요. 설정에서 다른 카메라를 골라보거나 30fps로 쓰세요. 측정은 그대로 돼요.` : '카메라가 30fps로 찍히고 있어요. 측정은 그대로 돼요.') : '공을 출발 자리에 놓고 멈추면 띵 소리가 나요. 그다음 퍼팅하세요.');
+      setHint(fpsLive && want === 60 && fpsLive < 45 ? (settings.camPick === 'user' ? '직접 고른 카메라가 30fps로 찍히고 있어요. 설정 → 카메라를 "기본 후면 카메라"로 바꾸면 60fps 카메라를 다시 찾아요.' : no60 ? '이 폰의 브라우저 카메라는 모두 30fps까지만 돼요. 30fps로도 볼 스피드 오차는 2% 안팎이에요.' : camMaxFps && camMaxFps < 50 ? `이 카메라는 브라우저에서 최대 ${Math.round(camMaxFps)}fps까지만 돼요. 설정에서 다른 카메라를 골라보거나 30fps로 쓰세요. 측정은 그대로 돼요.` : '카메라가 30fps로 찍히고 있어요. 측정은 그대로 돼요.') : '공을 출발 자리에 놓고 멈추면 띵 소리가 나요. 그다음 퍼팅하세요.');
       return;
     }
     if (S.tool === 'seed') { setHint(S.seed ? '준비됐어요. 측정 시작을 누르세요. 출발 자리를 바꾸려면 공을 다시 누르세요.' : '출발 자리에 놓인 공을 누르세요. 공 크기로 거리를 자동으로 맞춰요.'); return; }
@@ -1547,6 +1573,7 @@ input[type=number]{width:7em}
     const data = {
       ua: navigator.userAgent, fps: fpsLive, timeSource: tBase, jitterMs: jitterMs && r6(jitterMs), video: [vid.videoWidth, vid.videoHeight],
       stimp: settings.stimp, tilt: tiltDeg != null ? r6(tiltDeg) : null,
+      cam: { want: settings.fps, pick: settings.camPick || '', now: stream ? fmtSt(stream) : null, capFps: camMaxFps, no60, log: camLog },
       seed: S.seed && { x: r6(S.seed.x), y: r6(S.seed.y), r: r6(S.seed.r), ell: S.seed.ell ? [r6(S.seed.ell.a), r6(S.seed.ell.b), r6(S.seed.ell.ang)] : null },
       putts: runs.map(r => {
         const m = metricsFor(r);
@@ -1580,7 +1607,7 @@ input[type=number]{width:7em}
   const fpsEl = $('#fpsSel'); fpsEl.value = settings.fps === '30' ? '30' : '60';
   fpsEl.addEventListener('change', () => { settings.fps = fpsEl.value; saveSettings(); if (stream) { const was = running; if (was) stopRun(true); startCamera(); } });
   const camEl = $('#camSel');
-  camEl.addEventListener('change', () => { settings.deviceId = camEl.value; saveSettings(); if (stream) { if (running) stopRun(true); startCamera(); } });
+  camEl.addEventListener('change', () => { settings.deviceId = camEl.value; settings.camPick = camEl.value ? 'user' : ''; saveSettings(); if (stream) { if (running) stopRun(true); startCamera(); } });
 
   window.addEventListener('pagehide', () => { stopCamera(); keepAwake(false); });
   updateAll();
