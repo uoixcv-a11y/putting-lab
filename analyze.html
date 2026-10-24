@@ -456,7 +456,7 @@ input[type=number]{width:7em}
     <li>60fps로 찍으면 퍼팅마다 잡히는 공 위치가 두 배로 늘어서 볼 스피드가 더 정확해져요. 프레임은 영상에 기록된 실제 시간으로 계산해서, 자동 감지로 두면 30fps와 60fps 모두 맞게 재요. 30fps나 60fps를 직접 고르면 영상이 다르게 찍혔을 때 알려줘요.</li>
     <li>볼 스피드는 임팩트 직후 속도예요. 공은 처음에 미끄러지며 빨리 느려지다가 구르기 시작해요. 화면에서 그 지점을 찾아 미끄러진 거리와 구르기 시작한 속도를 재요. 구름 효율은 구르기 시작할 때 속도가 출발 속도의 몇 %인지예요. 스핀 없이 맞은 공은 71%이고, 높을수록 덜 미끄러진 거예요.</li>
     <li>폰이 기울어 있으면 화면 먼 쪽의 거리가 줄어들거나 늘어나서 구르는 속도가 틀어져요. 폰 화면을 매트와 평행하게 맞춰 찍으세요.</li>
-    <li>세게 친 공은 화면에서 길게 번져 보여요. 공이 멈춰 있을 때의 화면을 배경으로 기억해뒀다가, 움직인 부분만 보고 번진 공을 찾아요. 그래도 밝은 곳에서 찍을수록 덜 번져서 잘 잡혀요.</li>
+    <li>세게 친 공은 화면에서 길게 번져 보여요. 공이 멈춰 있을 때의 화면을 배경으로 기억해뒀다가, 움직인 부분만 보고 번진 공을 찾아요. 바로 뒤로 따라오는 퍼터는 공이 갈 수 있는 자리(제 줄을 따라, 서서히 느려지며)에 오지 않아서 따라가지 않아요. 중간에 공을 놓치면 그때까지 본 앞부분으로 재고, 목록 번호 옆에 *가 붙어요.</li>
     <li>점을 누르고 있으면 확대경이 떠요. 손가락을 움직여 정확히 맞춘 뒤 떼세요. 컴퓨터에서는 ← → 키로 프레임을 넘길 수 있어요.</li>
     <li>예상 굴림 거리는 "스팀프미터 공의 출발 속도(1.83m/s, 4.1mph)로 친 퍼팅은 스팀프 거리만큼 간다"를 기준으로, 실제 그린에서 잰 런치 모니터 값과 GSPro 퍼팅 표에 맞춘 곡선으로 계산해요. 그보다 빠르면 속도에 비해 덜 늘어나요. 구름 효율이 보통(71%)보다 좋으면 조금 더, 많이 미끄러지면 조금 덜 가요(최대 ±10%).</li>
   </ul>
@@ -1294,7 +1294,9 @@ input[type=number]{width:7em}
     for (let i = 0; i < dm.length; i++) { const v = g.m[i] - gb.m[i] - off; dm[i] = v > 0 ? (v < 255 ? v : 255) : 0; }
     // Found on the difference; but where the ball rolls over a white mark it partly vanishes there (white minus white),
     // so its exact spot is taken from the normal picture whenever the ball also shows up there right at that place.
-    const D = blobs(dm, w, h, 0.18 * ref.sc, 0.18 * ref.sc);
+    // Right where a moving ball must be next (area.faint), a fainter spot is accepted: a fast ball is a smeared streak.
+    const lo = (area.faint ? 0.09 : 0.18) * ref.sc;
+    const D = blobs(dm, w, h, lo, lo);
     const Rw = blobs(g.m, w, h, 0.25 * ref.sc, ref.mi - 0.85 * ref.sc);
     return D.map(o => {
       let best = null, bd = (0.7 * RS) * (0.7 * RS);
@@ -1505,6 +1507,7 @@ input[type=number]{width:7em}
     const mps2px = v => v * 1000 / mmPerPx / sc;
     const real = dt => dt / sc;
     const hyp = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const acc2px = a => a * 1000 / mmPerPx / (sc * sc);
     // A ball cut off by the picture edge would be measured off-center, so stop just before it reaches the edge.
     const nearEdge = q => {
       const m = 2.2 * r, vw = vid.videoWidth, vh = vid.videoHeight;
@@ -1558,80 +1561,187 @@ input[type=number]{width:7em}
       const bg = bgCv && bgFor === restStart ? bgCv : null;
       if (st === 'rest' && armed && bg) return Object.assign(cropBox(seed.x, seed.y, ROI_R * r), { bg });
       if (st !== 'move') return null;
-      return Object.assign(moveBox(t), { bg });
+      return Object.assign(moveBox(t), { bg, faint: !early() });
     }
+    // Right after impact: the stretch of the lane the ball can have reached by now. After that: around where it must be.
     function moveBox(t) {
       const L = track[track.length - 1], dtm = Math.max(0, t - L.t);
-      let ux = L.x - c0.x, uy = L.y - c0.y;
-      const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
-      if (track.length === 2) {
-        const ahead = mps2px(6) * dtm + r, pad = 3 * r + 0.08 * (ul + ahead);
-        const ax = L.x - 0.3 * r * ux, ay = L.y - 0.3 * r * uy, bx = L.x + ahead * ux, by = L.y + ahead * uy;
+      if (early()) {
+        const ln = laneDir(), sL = ln.own ? hyp(L, c0) : (L.x - c0.x) * ln.x + (L.y - c0.y) * ln.y;
+        const reach = Math.max(sL + r, reachAt(t));
+        if (ln.own) return cropBox(c0.x, c0.y, reach + 2.5 * r);
+        const pad = laneWide(ln, reach) + 2.5 * r;
+        const ax = c0.x + (sL - r) * ln.x, ay = c0.y + (sL - r) * ln.y, bx = c0.x + reach * ln.x, by = c0.y + reach * ln.y;
         return boxOf(Math.min(ax, bx) - pad, Math.min(ay, by) - pad, Math.max(ax, bx) + pad, Math.max(ay, by) + pad);
       }
-      const P2 = track[track.length - 2], vx = (L.x - P2.x) / (L.t - P2.t), vy = (L.y - P2.y) / (L.t - P2.t);
-      const px = L.x + vx * dtm, py = L.y + vy * dtm, half = 0.6 * Math.hypot(vx, vy) * dtm + 3.5 * r;
+      const f = velFit(), px = f.x + f.vx * dtm, py = f.y + f.vy * dtm, half = 0.6 * Math.hypot(f.vx, f.vy) * dtm + 3.5 * r;
       return boxOf(px - half, py - half, px + half, py + half);
     }
-    let st = 'wait', restStart = 0, restT = 0, c0 = null, track = [], restPts = [], armed = false, nextCheck = 0;
+    // The first four positions after impact are found differently from the rest (see step).
+    const early = () => track.length < 5;
+    // The lane the ball runs in right after impact: the known putt direction, else the way it has gone so far.
+    function laneDir() {
+      const fw = forward();
+      if (fw) return fw;
+      const L = track[track.length - 1], ux = L.x - c0.x, uy = L.y - c0.y, l = Math.hypot(ux, uy) || 1;
+      return { x: ux / l, y: uy / l, own: true };
+    }
+    // How far to the side of that lane the ball may be, sp along it. The ball starts on the line through the start spot
+    // and a putt starts at most a few degrees off the known direction (6° allowed), while the putter head shows up as
+    // spots at its toe and heel, off to the side. A direction taken from the putter is only rough (30° allowed); with no
+    // known direction at all, any direction away from the start is allowed.
+    const laneWide = (ln, sp) => ln.own ? Infinity : ln.sure ? 0.5 * r + 0.1 * sp : 1.5 * r + 0.6 * sp;
+    // Farthest along the lane a ball can be at t: no putt is faster than 7 m/s, counted from a little before the last
+    // frame the start spot looked occupied (right after impact the putter head can cover it for a frame or two).
+    const restRef = () => (restTs.length ? restTs[0] : restT);
+    const reachAt = t => mps2px(7) * (t - restRef()) + r;
+    // Where the ball is heading: a straight line through its positions of the last 0.1 s (at least three), as position
+    // at the last point's time and velocity.
+    function velFit() {
+      const p = track.slice(1), L = p[p.length - 1];
+      let k = p.length - 1;
+      while (k > 0 && (p.length - k < 3 || real(L.t - p[k - 1].t) <= 0.1)) k--;
+      const u = p.slice(k), n = u.length, mt = u.reduce((a, q) => a + q.t, 0) / n;
+      const mx = u.reduce((a, q) => a + q.x, 0) / n, my = u.reduce((a, q) => a + q.y, 0) / n;
+      let stt = 0, sx = 0, sy = 0;
+      u.forEach(q => { const d = q.t - mt; stt += d * d; sx += d * (q.x - mx); sy += d * (q.y - my); });
+      const vx = stt > 0 ? sx / stt : 0, vy = stt > 0 ? sy / stt : 0;
+      return { x: mx + vx * (L.t - mt), y: my + vy * (L.t - mt), vx, vy };
+    }
+    // The first points after impact are the shakiest: a smeared ball seen too far ahead, or the putter while the ball was
+    // too faint to see. A ball only slows, and gently, so the first step must match the next ones; drop it while it doesn't.
+    function tidyStart() {
+      const speed = (a, b) => hyp(a, b) / (b.t - a.t), off = (x, ref) => Math.abs(x - ref) / Math.max(ref, 1e-9);
+      for (let k = 0; k < 3 && track.length >= 5; k++) {
+        const v = [];
+        for (let i = 2; i < track.length; i++) v.push(speed(track[i - 1], track[i]));
+        const next = median(v.slice(1, 4));
+        if (Math.abs(v[0] - next) <= 0.3 * next + mps2px(0.15)) return;
+        // Which of the first two points is off: drop the one whose removal leaves the better fitting start.
+        const later = median(v.slice(2, 5)), dropSecond = off(speed(track[1], track[3]), later) < off(v[1], later);
+        track.splice(dropSecond ? 2 : 1, 1);
+      }
+    }
+    // A ball slows gently. A sudden big slowdown means the track went over to something else (the putter at the end of
+    // its swing, a hand): keep the part before it. Returns how many points to keep.
+    function keepUntil(pts) {
+      const v = [], tm = [];
+      for (let i = 1; i < pts.length; i++) { v.push(hyp(pts[i], pts[i - 1]) / (pts[i].t - pts[i - 1].t)); tm.push((pts[i].t + pts[i - 1].t) / 2); }
+      for (let b = 1; b + 1 < v.length; b++) {
+        const prev = (v[b - 1] + v[b]) / 2, t0 = (tm[b - 1] + tm[b]) / 2;
+        if (prev < mps2px(0.5)) continue;
+        // one step that suddenly drops to well under half, or two steps both clearly slower
+        if (v[b + 1] < 0.4 * prev && (prev - v[b + 1]) / (tm[b + 1] - t0) > acc2px(10)) return b + 2;
+        if (b + 2 < v.length && v[b + 1] < 0.75 * prev && v[b + 2] < 0.75 * prev) {
+          const next = (v[b + 1] + v[b + 2]) / 2;
+          if (next < 0.6 * prev && (prev - next) / ((tm[b + 1] + tm[b + 2]) / 2 - t0) > acc2px(10)) return b + 2;
+        }
+      }
+      return pts.length;
+    }
+    // Time between frames (the shortest step of the track so far).
+    function frameGap() {
+      let g = Infinity;
+      for (let i = 2; i < track.length; i++) g = Math.min(g, track[i].t - track[i - 1].t);
+      return Number.isFinite(g) ? g : 1 / 60;
+    }
+    // Lost from view: at the edge of the picture it was heading for (the normal end), or in the middle of it.
+    function lostEnd() {
+      const L = track[track.length - 1];
+      let x = L.x, y = L.y, vx = L.x - c0.x, vy = L.y - c0.y;
+      if (track.length >= 4) { const f = velFit(), g = 1.2 * frameGap(); x = f.x + f.vx * g; y = f.y + f.vy * g; vx = f.vx; vy = f.vy; }
+      const m = 2.6 * r, vw = vid.videoWidth, vh = vid.videoHeight, v = 0.3 * (Math.hypot(vx, vy) || 1);
+      return (x < m && vx < -v) || (vw - x < m && vx > v) || (y < m && vy < -v) || (vh - y < m && vy > v) ? 'edge' : 'lost';
+    }
+    let st = 'wait', restStart = 0, restT = 0, c0 = null, track = [], restPts = [], restTs = [], armed = false, nextCheck = 0;
     // Tracks thrown away here are kept (last few) so a missed putt can be explained from copied data.
     const drops = [];
     const drop = (why, pts) => { drops.push({ why, t: pts.length ? pts[0].t : null, n: pts.length, pts: pts.map(p => [p.t, p.x, p.y]) }); if (drops.length > 6) drops.shift(); return null; };
-    function finish() {
+    // end: 'edge' (reached the edge of the picture), 'stop' (came to rest), 'far', 'lost' (no longer found mid-picture),
+    // 'flush' (the video ended). cut: only the first part of a still-moving ball was measured.
+    function finish(end) {
       const tr = track; track = []; st = 'wait';
-      const pts = tr.slice(1);
-      if (pts.length < 3) return drop('few', pts);
+      let pts = tr.slice(1), cut = false;
+      const keep = keepUntil(pts);
+      if (keep < pts.length) { pts = pts.slice(0, keep); cut = true; }
+      // Something left the start fast and then broke off or vanished at once: most likely a putt that could not be followed.
+      if (pts.length < 3 && hint && hint.onBroken && tr.length > 1) {
+        const lp = tr[tr.length - 1], fast = hyp(lp, c0) / Math.max(1e-3, lp.t - tr[0].t) >= mps2px(1);
+        if (cut || (end !== 'flush' && fast)) hint.onBroken({ why: cut ? 'broken' : 'vanished', c0: { x: c0.x, y: c0.y }, tRest: tr[0].t, pts: tr.slice(1) });
+      }
+      if (pts.length < 3) return drop(cut ? 'broken' : 'few', tr.slice(1));
       const d = pts.map(p => hyp(p, c0));
       if (d[d.length - 1] < 4 * r) return drop('short', pts);
       for (let i = 1; i < d.length; i++) if (d[i] < d[i - 1] - 0.3 * r) return drop('back', pts);
+      if (end === 'lost') { const a = pts[pts.length - 2], b = pts[pts.length - 1]; if (hyp(a, b) / (b.t - a.t) >= mps2px(0.5)) cut = true; }
       const lp = pts[pts.length - 1];
       if (d[d.length - 1] >= 10 * r) lastDir = { x: (lp.x - c0.x) / d[d.length - 1], y: (lp.y - c0.y) / d[d.length - 1] };
-      return { ok: true, c0: { x: c0.x, y: c0.y }, tRest: tr[0].t, pts, tImpact: (tr[0].t + pts[0].t) / 2 };
+      return { ok: true, c0: { x: c0.x, y: c0.y }, tRest: tr[0].t, pts, tImpact: (tr[0].t + pts[0].t) / 2, end, cut, raw: keep < tr.length - 1 ? tr.slice(1) : null };
     }
     function step(t, D) {
       if (st === 'move') {
-        const L = track[track.length - 1], P2 = track[track.length - 2], dtm = t - L.t;
-        // Only look ahead of the ball along its line, so the putter following behind is never picked.
-        let ux = L.x - c0.x, uy = L.y - c0.y;
-        const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
-        const sL = ul, maxAhead = mps2px(6) * dtm + r;
-        const C = D.filter(c => {
-          const dx = c.x - c0.x, dy = c.y - c0.y, sp = dx * ux + dy * uy, lat = Math.abs(dy * ux - dx * uy);
-          return sp >= sL - 0.3 * r && sp <= sL + maxAhead && lat <= 1.2 * r + 0.08 * sp;
-        });
+        const L = track[track.length - 1], dtm = t - L.t, first = early();
         let q = null;
-        if (track.length === 2) {
-          // Speed is still unknown right after impact. On the background-subtracted picture only moving things are left,
-          // and the ball is always in front of the putter: take the one farthest ahead. Otherwise the most ball-like one.
-          if (C.length && C[0].diff) {
-            let best = -Infinity;
-            C.forEach(c => { if (c.sc < 0.3 * ref.sc) return; const sp = (c.x - c0.x) * ux + (c.y - c0.y) * uy; if (sp > best) { best = sp; q = c; } });
-          } else C.forEach(c => { if (c.sc >= 0.6 * ref.sc && (!q || c.sc > q.sc)) q = c; });
+        if (first) {
+          // Right after impact the ball is the moving thing farthest ahead in its lane: on the background-subtracted
+          // picture only moving things are left, and the putter only follows the ball. Anything not ahead of the last
+          // point (the putter, in a frame where the smeared ball was too faint to see) is skipped.
+          // Without a background picture: the most ball-like thing ahead.
+          const ln = laneDir(), sL = ln.own ? hyp(L, c0) : (L.x - c0.x) * ln.x + (L.y - c0.y) * ln.y, reach = reachAt(t);
+          const along = c => (ln.own ? hyp(c, c0) : (c.x - c0.x) * ln.x + (c.y - c0.y) * ln.y);
+          const C = D.filter(c => {
+            if (c.sc < (c.diff ? 0.25 : 0.6) * ref.sc) return false;
+            const sp = along(c), lat = Math.abs((c.x - c0.x) * ln.y - (c.y - c0.y) * ln.x);
+            return sp >= sL + 0.1 * r && sp <= reach && lat <= laneWide(ln, sp);
+          });
+          C.forEach(c => {
+            const sp = along(c);
+            if (!q || (c.diff ? sp > q.sp : c.sc > q.sc)) q = Object.assign({}, c, { sp });
+          });
         } else {
-          const vx = (L.x - P2.x) / (L.t - P2.t), vy = (L.y - P2.y) / (L.t - P2.t);
-          const px = L.x + vx * dtm, py = L.y + vy * dtm, win = 0.6 * Math.hypot(vx, vy) * dtm + 1.5 * r;
+          // Then only where a ball that keeps its line and slows at most like sliding friction (7 m/s² allowed) can be.
+          // The putter, a hand or a foot moving differently never fits; a frame without the ball is skipped.
+          // A fast ball is a streak about one frame's travel long: its spot is less certain along the way it moves, and it
+          // may show up as two spots, one at each end. Its middle is where the ball is.
+          const f = velFit(), px = f.x + f.vx * dtm, py = f.y + f.vy * dtm, vp = Math.hypot(f.vx, f.vy), smear = vp * frameGap();
+          const ahead = 0.4 * r + 0.12 * vp * dtm + 0.25 * smear, behind = ahead + 0.5 * acc2px(7) * dtm * dtm, side = 0.4 * r + 0.06 * vp * dtm;
+          const ex = vp > 0 ? f.vx / vp : 0, ey = vp > 0 ? f.vy / vp : 0;
+          const C = D.slice();
+          if (smear > 1.2 * r) for (let i = 0; i < D.length; i++) for (let j = i + 1; j < D.length; j++) {
+            const a = D[i], b = D[j], dx = b.x - a.x, dy = b.y - a.y, al = Math.abs(dx * ex + dy * ey), lt = Math.abs(dx * ey - dy * ex);
+            if (lt <= 0.4 * r && al >= 0.8 * r && al <= smear + 0.5 * r) C.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, sc: Math.max(a.sc, b.sc), mi: Math.max(a.mi, b.mi), diff: a.diff });
+          }
           let bd = Infinity;
-          C.forEach(c => { const dd = Math.hypot(c.x - px, c.y - py); if (dd <= win && dd < bd) { bd = dd; q = c; } });
+          C.forEach(c => {
+            const dx = c.x - px, dy = c.y - py, dd = dx * dx + dy * dy;
+            let ok;
+            if (vp < mps2px(0.05)) ok = Math.sqrt(dd) <= behind;
+            else { const da = dx * ex + dy * ey, dl = Math.abs(dx * ey - dy * ex); ok = da >= -behind && da <= ahead && dl <= side; }
+            if (ok && dd < bd) { bd = dd; q = c; }
+          });
         }
         if (q) {
-          if (nearEdge(q)) return finish();
+          if (nearEdge(q)) return finish('edge');
           track.push({ t, x: q.x, y: q.y });
+          if (first) tidyStart();
           // Stopped: has barely moved over the last 0.1 s (time-based, so it works at any frame rate).
           let back = null;
           for (let k = track.length - 2; k >= 1; k--) if (real(t - track[k].t) >= 0.1) { back = track[k]; break; }
           const stalled = !!back && hyp(q, back) < 0.5 * r;
-          if (hyp(q, c0) >= MAX_R * r || stalled) return finish();
+          if (hyp(q, c0) >= MAX_R * r) return finish('far');
+          if (stalled) return finish('stop');
           return null;
         }
-        return real(t - L.t) > 0.1 ? finish() : null;
+        return real(t - L.t) > 0.1 ? finish(lostEnd()) : null;
       }
       const near = st === 'rest'
         ? D.filter(q => hyp(q, c0) < 0.6 * r && (!q.diff || q.sc >= 0.55 * ref.sc))
         : D.filter(q => hyp(q, seed) < 1.5 * r);
       if (near.length) {
         const q = near.reduce((a, b) => (b.sc > a.sc ? b : a));
-        if (st === 'wait') { st = 'rest'; restStart = t; restPts = []; armed = false; nextCheck = 0; bgAt = -Infinity; backX = backY = backW = 0; }
+        if (st === 'wait') { st = 'rest'; restStart = t; restPts = []; restTs = []; armed = false; nextCheck = 0; bgAt = -Infinity; backX = backY = backW = 0; }
         restPts.push(q); if (restPts.length > 6) restPts.shift();
+        restTs.push(t); if (restTs.length > 3) restTs.shift();
         c0 = { x: restPts.reduce((a, p) => a + p.x, 0) / restPts.length, y: restPts.reduce((a, p) => a + p.y, 0) / restPts.length };
         restT = t;
         // Only a real ball can start a putt: after a short rest, check it is as bright as the ball and the same size.
@@ -1653,19 +1763,19 @@ input[type=number]{width:7em}
       if (st !== 'rest') return null;
       if (!armed) { if (real(t - restT) > 0.15) st = 'wait'; return null; }
       if (real(restT - restStart) < 0.25) { if (real(t - restT) > 0.15) st = 'wait'; return null; }
-      const maxStep = mps2px(6) * (t - restT) + r;
+      const maxStep = mps2px(7) * (t - restRef()) + r;
       const C = D.filter(q => hyp(q, c0) <= maxStep && q.sc >= (q.diff ? 0.3 : 0.6) * ref.sc);
       const fw = C.length && C[0].diff ? forward() : null, fx = fw ? fw.x : 0, fy = fw ? fw.y : 0;
       if (C.length) {
         let q = null;
         if (fw) {
           // Ahead of the start along the way the ball must go, and not far to the side of it (a putter head is wide).
-          C.forEach(c => {
-            const dx = c.x - c0.x, dy = c.y - c0.y, sp = dx * fx + dy * fy, lat = Math.abs(dx * fy - dy * fx);
-            if (sp > 0.5 * r && (!fw.sure || lat <= 1.5 * r + 0.35 * sp) && (!q || sp > q.sp)) q = Object.assign({}, c, { sp });
-          });
+          const along = c => (c.x - c0.x) * fx + (c.y - c0.y) * fy;
+          const A = C.filter(c => along(c) > 0.5 * r && (!fw.sure || Math.abs((c.x - c0.x) * fy - (c.y - c0.y) * fx) <= laneWide(fw, along(c))));
+          A.forEach(c => { const sp = along(c); if (sp > 0.5 * r && (!q || sp > q.sp)) q = Object.assign({}, c, { sp }); });
           if (!q) { if (real(t - restT) > 0.15) st = 'wait'; return null; }
-        } else q = C.reduce((a, b) => (b.sc > a.sc ? b : a));
+        } else if (C[0].diff) q = C.reduce((a, b) => (hyp(b, c0) > hyp(a, c0) ? b : a));
+        else q = C.reduce((a, b) => (b.sc > a.sc ? b : a));
         // The most ball-like thing has barely moved yet (high frame rates): wait a frame rather than grab the putter.
         if (hyp(q, c0) < 0.9 * r) return null;
         track = [{ t: restT, x: c0.x, y: c0.y }, { t, x: q.x, y: q.y }];
@@ -1678,7 +1788,7 @@ input[type=number]{width:7em}
     return {
       step,
       region,
-      flush: () => (st === 'move' ? finish() : null),
+      flush: () => (st === 'move' ? finish('flush') : null),
       current: () => (st === 'move' ? track.slice() : null),
       rest: () => (st === 'rest' ? c0 : null),
       armed: () => st === 'rest' && armed,
@@ -1878,8 +1988,15 @@ input[type=number]{width:7em}
     const early = within(S, S[0].tau, 0.05);
     const pair = early.length >= 2 ? linFit(early).b : (S[1].s - S[0].s) / (S[1].tau - S[0].tau);
     let v0 = NaN, tauI = NaN;
-    let first = within(S, S[0].tau, 0.14);
-    if (first.length < 4) first = S.slice(0, 4);
+    // The first points after impact are the least certain (the ball smears as it starts, the putter is right behind
+    // it, and the first spot is taken as the one farthest ahead): when the frame rate leaves enough points in the
+    // window, it starts one or two points later. That leaves the launch itself to the fit, as before.
+    let skip = 0;
+    if (S.length >= 9 && within(S, S[2].tau, 0.14).length >= 7) skip = 2;
+    else if (S.length >= 7 && within(S, S[1].tau, 0.14).length >= 6) skip = 1;
+    const Sw = S.slice(skip);
+    let first = within(Sw, Sw[0].tau, 0.14);
+    if (first.length < 4) first = Sw.slice(0, 4);
     first = first.slice(0, 12);
     if (first.length >= 4) {
       const x0 = first[0].tau, q = quadFit(first, x0);
@@ -1936,7 +2053,7 @@ input[type=number]{width:7em}
     return {
       v0, roll, vEnd: vRoll, vRoll, skid, eff, effMax, phase: ph.kind, seen: ph.sEnd != null ? ph.sEnd : S[S.length - 1].s,
       d1: ph.d1 != null ? ph.d1 : ph.d, d2: ph.d2 != null ? ph.d2 : null,
-      ang: ag ? ag.ang : null, defaultGround: ag ? !!ag.defaultGround : false, tImpact: run.tRest + tauI * sc
+      ang: ag ? ag.ang : null, defaultGround: ag ? !!ag.defaultGround : false, tImpact: run.tRest + tauI * sc, cut: !!run.cut
     };
   }
   const puttRows = () => tabs.putt.runs.map((r, i) => { const m = runMetrics(r); return { i, ok: !!(r.ok && m), ex: !!r.ex, m, reason: r.reason }; });
@@ -1962,12 +2079,12 @@ input[type=number]{width:7em}
   const cmOf = x => Math.round(x * 100);
   function rollInfo(m) {
     if (!m || !m.phase) return { v: '—', u: '', s: '—', frac: null };
-    const seen = `화면에서 ${cmOf(m.seen)}cm 따라감`;
+    const seen = m.cut ? `${cmOf(m.seen)}cm까지 따라가고 공을 놓침` : `화면에서 ${cmOf(m.seen)}cm 따라감`;
     if (m.phase === 'knot') return { v: String(Math.round(m.eff * 100)), u: '%', s: `${cmOf(m.skid)}cm 미끄러지고 ${m.vRoll.toFixed(2)} m/s로 구르기 시작`, frac: clamp(m.skid / m.seen, 0, 1), seen };
-    if (m.phase === 'skid') return { v: '≤' + Math.round(m.effMax * 100), u: '%', s: `화면 끝(${cmOf(m.seen)}cm)까지 계속 미끄러졌어요. 거리는 미끄러짐이 곧 끝난다고 보고 계산해요.`, frac: 1, cont: true, seen };
+    if (m.phase === 'skid') return { v: '≤' + Math.round(m.effMax * 100), u: '%', s: (m.cut ? `공을 놓친 ${cmOf(m.seen)}cm 지점까지` : `화면 끝(${cmOf(m.seen)}cm)까지`) + ' 계속 미끄러졌어요. 거리는 미끄러짐이 곧 끝난다고 보고 계산해요.', frac: 1, cont: true, seen };
     if (m.phase === 'roll' && m.eff != null) return { v: String(Math.min(100, Math.round(m.eff * 100))), u: '%', s: `처음부터 굴렀어요 · 미끄러짐 ${Math.max(1, cmOf(m.skid))}cm 이하`, frac: clamp(m.skid / m.seen, 0, 1), seen };
     if (m.phase === 'roll') return { v: '—', u: '', s: `${Math.max(1, cmOf(m.skid))}cm 안에 구르기 시작했어요. 느린 퍼팅은 미끄러짐이 워낙 짧아서 구름 효율을 재지 못해요.`, frac: clamp(m.skid / m.seen, 0, 1), seen };
-    return { v: '—', u: '', s: '따라간 거리가 짧아서 미끄러짐과 구름을 구분하지 못했어요.', frac: null };
+    return { v: '—', u: '', s: m.cut ? `공을 ${cmOf(m.seen)}cm에서 놓쳐서 미끄러짐과 구름을 구분하지 못했어요. 볼 스피드는 그 앞부분으로 쟀어요.` : '따라간 거리가 짧아서 미끄러짐과 구름을 구분하지 못했어요.', frac: null };
   }
   function rollAvg(s) {
     if (s.eff == null) return { v: '—', u: '', s: s.longSkid ? `${s.longSkid}개 모두 화면 끝까지 미끄러졌어요` : '구분된 퍼팅이 없어요', frac: null };
@@ -2007,7 +2124,7 @@ input[type=number]{width:7em}
       row.className = 'run' + (r.i === sel ? ' sel' : '') + (r.ex ? ' excl' : '') + (!r.ok ? ' fail' : '');
       row.dataset.i = r.i;
       if (!example) { row.tabIndex = 0; row.setAttribute('role', 'button'); row.setAttribute('aria-pressed', String(r.i === sel)); }
-      const cells = [String(r.i + 1), r.ok ? r.m.v0.toFixed(2) : '—', r.ok ? fmtAng(r.m.ang, view) : (r.reason || '인식 실패'), r.ok ? r.m.roll.toFixed(1) + 'm' : '—', r.ok ? effCell(r.m) : '—'];
+      const cells = [String(r.i + 1) + (r.ok && r.m.cut ? '*' : ''), r.ok ? r.m.v0.toFixed(2) : '—', r.ok ? fmtAng(r.m.ang, view) : (r.reason || '인식 실패'), r.ok ? r.m.roll.toFixed(1) + 'm' : '—', r.ok ? effCell(r.m) : '—'];
       cells.forEach((c, ci) => { const s = document.createElement('span'); s.textContent = c; if (ci === 2 && !r.ok) s.className = 'why'; row.appendChild(s); });
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'ex'; b.dataset.ex = r.i; b.textContent = r.ex ? '포함' : '제외';
