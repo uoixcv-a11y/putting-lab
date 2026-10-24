@@ -804,19 +804,20 @@ input[type=number]{width:7em}
         track.splice(dropSecond ? 2 : 1, 1);
       }
     }
-    // A ball slows gently. A sudden big slowdown means the track went over to something else (the putter at the end of
-    // its swing, a hand): keep the part before it. Returns how many points to keep.
+    // A ball slows gently. A sudden big slowdown that lasts (the track went over to the putter at the end of its swing, or
+    // a hand) means the rest is something else: keep the part before it. A single spot read off the path (a smeared ball
+    // seen too far ahead) is no reason to cut; such a spot is left out later. Returns how many points to keep.
     function keepUntil(pts) {
       const v = [], tm = [];
       for (let i = 1; i < pts.length; i++) { v.push(hyp(pts[i], pts[i - 1]) / (pts[i].t - pts[i - 1].t)); tm.push((pts[i].t + pts[i - 1].t) / 2); }
-      for (let b = 1; b + 1 < v.length; b++) {
-        const prev = (v[b - 1] + v[b]) / 2, t0 = (tm[b - 1] + tm[b]) / 2;
+      for (let b = 1; b + 2 < v.length; b++) {
+        const prev = (v[b - 1] + v[b]) / 2;
         if (prev < mps2px(0.5)) continue;
-        // one step that suddenly drops to well under half, or two steps both clearly slower
-        if (v[b + 1] < 0.4 * prev && (prev - v[b + 1]) / (tm[b + 1] - t0) > acc2px(10)) return b + 2;
-        if (b + 2 < v.length && v[b + 1] < 0.75 * prev && v[b + 2] < 0.75 * prev) {
-          const next = (v[b + 1] + v[b + 2]) / 2;
-          if (next < 0.6 * prev && (prev - next) / ((tm[b + 1] + tm[b + 2]) / 2 - t0) > acc2px(10)) return b + 2;
+        // the next two or three steps all well under the speed before
+        const next = v.slice(b + 1, b + 4);
+        if (next.every(x => x < 0.6 * prev)) {
+          const nm = next.reduce((a, x) => a + x, 0) / next.length;
+          if ((prev - nm) / (tm[b + 1] - (tm[b - 1] + tm[b]) / 2) > acc2px(10)) return b + 2;
         }
       }
       return pts.length;
@@ -1564,56 +1565,63 @@ input[type=number]{width:7em}
     S.seed = run.seed;
     try { return runMetrics(run); } finally { S.seed = keep; }
   }
-  // A real putt slows smoothly and frames arrive evenly; anything else is a glitch and is not read out as a result.
-  // Each step's speed must match its neighbours (the ball may slow right down to a stop inside a long view),
-  // and the ball never speeds up. Returns '' when fine, else why not.
-  function trackProblem(run) {
-    const pts = run.pts;
-    if (pts.length < 3) return 'few';
-    const floor = 0.12 * 1000 / (BALL_MM / (2 * (run.seed.rs || run.seed.r)));   // 0.12 m/s in pixels per second
-    const sp = [], dts = [];
-    for (let i = 1; i < pts.length; i++) {
-      const dt = pts[i].t - pts[i - 1].t;
-      if (!(dt > 0) || (fpsLive && dt < 0.6 / fpsLive)) return 'frames';
-      sp.push(Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y) / dt); dts.push(dt);
+  // A real putt follows one smooth path: it slides, then rolls, along a straight line. The spots found must lie on such a
+  // path to within the blur of a frame (along the way 6 mm + 20% of a frame's travel, sideways 6 mm + 10%). A fast ball is
+  // a smeared streak and its spot wobbles by that much, most of all over the mat's white marks; a spot farther off (read
+  // at the wrong end of the streak, or on a mark) is left out, up to an eighth of them (at least two). The average
+  // slowing must be a ball's (-1.5 to 9 m/s²), and at least five spots must remain.
+  const TRACK_TOL = { base: 6, travel: 0.2, sideBase: 6, sideTravel: 0.1, decelMin: -1.5, decelMax: 9, minPts: 5 };
+  // Position along the line (m, from the start spot) and sideways offset (mm) of each spot, with the misfit of each from
+  // the best slide-then-roll path (mm).
+  function pathFit(run, pts, mm) {
+    const c0 = run.c0, n = pts.length;
+    const mx = pts.reduce((a, p) => a + p.x, 0) / n, my = pts.reduce((a, p) => a + p.y, 0) / n;
+    let sxx = 0, syy = 0, sxy = 0;
+    pts.forEach(p => { sxx += (p.x - mx) * (p.x - mx); syy += (p.y - my) * (p.y - my); sxy += (p.x - mx) * (p.y - my); });
+    const th = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    let ux = Math.cos(th), uy = Math.sin(th);
+    if ((pts[n - 1].x - c0.x) * ux + (pts[n - 1].y - c0.y) * uy < 0) { ux = -ux; uy = -uy; }
+    const T = pts.map(p => ({ tau: p.t - run.tRest, s: ((p.x - c0.x) * ux + (p.y - c0.y) * uy) * mm / 1000 }));
+    const x0 = T[0].tau;
+    let best = polyFit(T, x0, null), knot = null;
+    if (n >= 7) {
+      const lo = T[2].tau - x0, hi = T[n - 4].tau - x0;
+      for (let k = 0; k <= 80; k++) { const f = polyFit(T, x0, lo + (hi - lo) * k / 80); if (f && (!best || f.sse < best.sse)) { best = f; knot = f.knot; } }
     }
-    if (!(sp[0] > 0)) return 'still';
-    for (let i = 0; i < sp.length; i++) {
-      const nb = i === 0 ? sp[1] : i === sp.length - 1 ? sp[i - 1] : (sp[i - 1] + sp[i + 1]) / 2;
-      // a smeared fast ball is found to within a pixel or two; allow for that on top of 30% and 0.12 m/s
-      if (Math.abs(sp[i] - nb) > 0.3 * nb + floor + 4.5 / dts[i]) return 'jump ' + (i + 1);
-    }
-    return sp.every((v, i) => v < 1.2 * sp[0] + floor + 4.5 / dts[i]) ? '' : 'faster';
+    if (!best) return null;
+    const c = best.c, at = tau => { const x = tau - x0; let y = c[0] + c[1] * x + c[2] * x * x; if (knot != null) { const d = Math.max(0, x - knot); y += c[3] * d * d; } return y; };
+    return { T, x0, along: T.map(q => (q.s - at(q.tau)) * 1000), side: pts.map(p => ((p.x - mx) * uy - (p.y - my) * ux) * mm) };
   }
-  // One or two bad frames (a wrong time stamp, a misread spot) shouldn't throw a whole putt away: take them out when
-  // that makes the rest of the track smooth.
-  function cleanTrack(run) {
-    let pts = run.pts.slice(), why = trackProblem(run);
-    // The first spot after impact is the shakiest (the ball smeared as it starts, or the putter right behind it): when
-    // the track starts too slow or too fast for the rest of it, try it without that first spot.
-    for (let k = 0; k < 2 && (why === 'faster' || why === 'jump 1') && pts.length > 5; k++) {
-      const p2 = pts.slice(1), w2 = trackProblem(Object.assign({}, run, { pts: p2 }));
-      if (w2 === 'few' || w2 === 'frames' || w2 === 'still') break;
-      pts = p2; why = w2;
-    }
-    for (let k = 0; k < 2 && why.startsWith('jump'); k++) {
-      const s = +why.split(' ')[1];
-      let fixed = null;
-      for (const j of [s, s - 1]) {
-        if (j < 1 || j >= pts.length || pts.length <= 5) continue;
-        const p2 = pts.filter((_, n) => n !== j), w2 = trackProblem(Object.assign({}, run, { pts: p2 }));
-        if (!w2 || !w2.startsWith('jump') || +w2.split(' ')[1] > s) { fixed = { pts: p2, why: w2 }; break; }
+  // Returns the spots to use, '' when fine (else why not), and how many spots were left out.
+  function trackCheck(run) {
+    const mm = BALL_MM / (2 * (run.seed.rs || run.seed.r)), all = run.pts, maxOut = Math.max(2, Math.floor(all.length / 8));
+    const pts = all.slice(), out = () => all.length - pts.length;
+    for (;;) {
+      if (pts.length < TRACK_TOL.minPts) return { pts, why: 'few', removed: out() };
+      const f = pathFit(run, pts, mm);
+      if (!f) return { pts, why: 'fit', removed: out() };
+      let worst = -1, wv = 1;
+      pts.forEach((p, i) => {
+        const a = Math.max(0, i - 1), b = Math.min(pts.length - 1, i + 1);
+        const frames = Math.max(1, Math.round((pts[b].t - pts[a].t) * (fpsLive || 60)));
+        const travel = Math.hypot(pts[b].x - pts[a].x, pts[b].y - pts[a].y) / frames * mm;   // mm per frame here
+        const v = Math.max(Math.abs(f.along[i]) / (TRACK_TOL.base + TRACK_TOL.travel * travel), Math.abs(f.side[i]) / (TRACK_TOL.sideBase + TRACK_TOL.sideTravel * travel));
+        if (v > wv) { wv = v; worst = i; }
+      });
+      if (worst < 0) {
+        const q = polyFit(f.T, f.x0, null), dec = q ? -2 * q.c[2] : NaN;
+        if (!(dec >= TRACK_TOL.decelMin && dec <= TRACK_TOL.decelMax)) return { pts, why: 'decel ' + (Number.isFinite(dec) ? dec.toFixed(1) : '?'), removed: out() };
+        return { pts, why: '', removed: out() };
       }
-      if (!fixed) break;
-      pts = fixed.pts; why = fixed.why;
+      if (out() >= maxOut) return { pts, why: 'wobble', removed: out() };
+      pts.splice(worst, 1);
     }
-    return { pts, why, removed: run.pts.length - pts.length };
   }
   function onPutt(run) {
     run.seed = { x: S.seed.x, y: S.seed.y, r: S.seed.r, rs: S.seed.rs };
     run.tilt = tiltDeg;
     run.dropped = curDropped >= DROP_WARN; curDropped = 0;
-    const cl = cleanTrack(run);
+    const cl = trackCheck(run);
     const followed = run.raw || run.pts;
     if (cl.removed && !cl.why) { run.rawPts = run.pts; run.pts = cl.pts; }
     const m = metricsFor(run);

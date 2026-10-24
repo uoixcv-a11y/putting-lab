@@ -1622,19 +1622,20 @@ input[type=number]{width:7em}
         track.splice(dropSecond ? 2 : 1, 1);
       }
     }
-    // A ball slows gently. A sudden big slowdown means the track went over to something else (the putter at the end of
-    // its swing, a hand): keep the part before it. Returns how many points to keep.
+    // A ball slows gently. A sudden big slowdown that lasts (the track went over to the putter at the end of its swing, or
+    // a hand) means the rest is something else: keep the part before it. A single spot read off the path (a smeared ball
+    // seen too far ahead) is no reason to cut; such a spot is left out later. Returns how many points to keep.
     function keepUntil(pts) {
       const v = [], tm = [];
       for (let i = 1; i < pts.length; i++) { v.push(hyp(pts[i], pts[i - 1]) / (pts[i].t - pts[i - 1].t)); tm.push((pts[i].t + pts[i - 1].t) / 2); }
-      for (let b = 1; b + 1 < v.length; b++) {
-        const prev = (v[b - 1] + v[b]) / 2, t0 = (tm[b - 1] + tm[b]) / 2;
+      for (let b = 1; b + 2 < v.length; b++) {
+        const prev = (v[b - 1] + v[b]) / 2;
         if (prev < mps2px(0.5)) continue;
-        // one step that suddenly drops to well under half, or two steps both clearly slower
-        if (v[b + 1] < 0.4 * prev && (prev - v[b + 1]) / (tm[b + 1] - t0) > acc2px(10)) return b + 2;
-        if (b + 2 < v.length && v[b + 1] < 0.75 * prev && v[b + 2] < 0.75 * prev) {
-          const next = (v[b + 1] + v[b + 2]) / 2;
-          if (next < 0.6 * prev && (prev - next) / ((tm[b + 1] + tm[b + 2]) / 2 - t0) > acc2px(10)) return b + 2;
+        // the next two or three steps all well under the speed before
+        const next = v.slice(b + 1, b + 4);
+        if (next.every(x => x < 0.6 * prev)) {
+          const nm = next.reduce((a, x) => a + x, 0) / next.length;
+          if ((prev - nm) / (tm[b + 1] - (tm[b - 1] + tm[b]) / 2) > acc2px(10)) return b + 2;
         }
       }
       return pts.length;
